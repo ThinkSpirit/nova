@@ -65,9 +65,6 @@ chmod: CommandFilter, /bin/chmod, root
 # nova/network/linux_net.py: 'ip', 'addr', 'show', 'dev', interface, ..
 # nova/network/linux_net.py: 'ip', 'link', 'set', dev, address, ..
 # nova/network/linux_net.py: 'ip', 'link', 'set', dev, 'up'
-# nova/network/linux_net.py: 'ip', 'route', 'add', ..
-# nova/network/linux_net.py: 'ip', 'route', 'del', .
-# nova/network/linux_net.py: 'ip', 'route', 'show', 'dev', dev
 ip: CommandFilter, /sbin/ip, root
 
 # nova/virt/libvirt/vif.py: 'tunctl', '-b', '-t', dev
@@ -112,6 +109,14 @@ ip6tables-restore: CommandFilter, ip6tables-restore, root
 # nova/network/linux_net.py: 'arping', '-U', floating_ip, '-A', '-I', ...
 # nova/network/linux_net.py: 'arping', '-U', network_ref['dhcp_server'],..
 arping: CommandFilter, arping, root
+
+# nova/network/linux_net.py: 'route', '-n'
+# nova/network/linux_net.py: 'route', 'del', 'default', 'gw'
+# nova/network/linux_net.py: 'route', 'add', 'default', 'gw'
+# nova/network/linux_net.py: 'route', '-n'
+# nova/network/linux_net.py: 'route', 'del', 'default', 'gw', old_gw, ..
+# nova/network/linux_net.py: 'route', 'add', 'default', 'gw', old_gateway
+route: CommandFilter, /sbin/route, root
 
 # nova/network/linux_net.py: 'dhcp_release', dev, address, mac_address
 dhcp_release: CommandFilter, /usr/bin/dhcp_release, root
@@ -166,3 +171,41 @@ lvs: CommandFilter, /sbin/lvs, root
 
 # nova/virt/libvirt/utils.py:
 vgs: CommandFilter, /sbin/vgs, root
+
+# Rackspace Openvz starts here
+# nova/compute/manager.py: 'blockdev', '--getsize64', host_device
+blockdev: CommandFilter, /sbin/blockdev, root
+
+# nova/virt/openvz_conn.py: '/usr/sbin/vzlist'
+vzlist: CommandFilter, /usr/sbin/vzlist, root
+
+# nova/virt/openvz_conn.py: '/usr/sbin/vzctl'
+vzctl: CommandFilter, /usr/sbin/vzctl, root
+
+# nova/virt/openvz_conn.py: '/usr/sbin/arping'
+arping_usrsbin: CommandFilter, /usr/sbin/arping, root
+
+# nova/virt/openvz_conn.py: '/bin/rm'
+rm: CommandFilter, /bin/rm, root
+
+# nova/virt/openvz_conn.py:
+cpuinfo: ReadFileFilter, /proc/cpuinfo
+
+# nova/virt/openvz_conn.py:
+meminfo: ReadFileFilter, /proc/meminfo
+
+# nova/virt/openvz_conn.py: '/usr/sbin/vzcpucheck'
+vzcpucheck: CommandFilter, /usr/sbin/vzcpucheck, root
+
+# nova/virt/openvz_conn.py: '/bin/rmdir'
+rmdir: CommandFilter, /bin/rmdir, root
+
+# nova/virt/openvz/volume_drivers/iscsi.py: '/usr/bin/iscsiadm'
+iscsiadm_usrsbin: CommandFilter, /usr/bin/iscsiadm, root
+
+# nova/virt/openvz/utils.py: '/sbin/blkid'
+blkid: CommandFilter, /sbin/blkid, root
+
+# nova/virt/openvz/network_plugins/tc.py
+tc: CommandFilter, /sbin/tc, root
+
