@@ -23,7 +23,7 @@ is sketchy at best.
 import os
 from nova import exception
 from nova import flags
-from nova import log as logging
+from nova.openstack.common import log as logging
 from nova.virt.openvz import utils as ovz_utils
 
 FLAGS = flags.FLAGS

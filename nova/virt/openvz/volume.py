@@ -23,7 +23,7 @@ is sketchy at best.
 import os
 import pexpect
 import uuid as uuid4
-from nova import log as logging
+from nova.openstack.common import log as logging
 from nova import db
 from nova import context
 from nova import exception

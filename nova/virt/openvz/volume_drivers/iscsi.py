@@ -24,7 +24,7 @@ from nova.virt.openvz import utils as ovz_utils
 from nova import flags
 from nova import exception
 from nova.openstack.common import cfg
-from nova import log as logging
+from nova.openstack.common import log as logging
 from nova.utils import synchronized
 
 

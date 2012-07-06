@@ -22,7 +22,7 @@ is sketchy at best.
 
 from nova.virt.vif import VIFDriver
 from nova.network import linux_net
-from nova import log as logging
+from nova.openstack.common import log as logging
 
 LOG = logging.getLogger('nova.virt.openvz.network_drivers.network_bridge')
 

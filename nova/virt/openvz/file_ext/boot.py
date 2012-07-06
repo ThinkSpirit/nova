@@ -21,7 +21,7 @@ using the host node's context so we are implementing one here
 """
 
 import os
-from nova import log as logging
+from nova.openstack.common import log as logging
 from nova import flags
 from nova.virt.openvz.file import OVZFile
 

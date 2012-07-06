@@ -22,7 +22,7 @@ from nova.virt.openvz import utils as ovz_utils
 from nova import db
 from nova import context
 from nova import flags
-from nova import log as logging
+from nova.openstack.common import log as logging
 from Cheetah.Template import Template
 
 FLAGS = flags.FLAGS
