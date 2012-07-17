@@ -420,6 +420,9 @@ class OpenVzConnection(driver.ComputeDriver):
         if files_to_inject:
             self._inject_files(instance, files_to_inject)
 
+        if instance['key_data']:
+            self._inject_ssh_key(instance, str(instance['key_data']))
+
         self._start(instance)
         self._initial_secure_host(instance)
         self._gratuitous_arp_all_addresses(instance, network_info)
@@ -1162,6 +1165,33 @@ class OpenVzConnection(driver.ComputeDriver):
             self.inject_file(instance,
                              b64encode(file_to_inject[0]),
                              b64encode(file_to_inject[1]))
+
+    def _inject_ssh_key(self, instance, key):
+        """
+        Inject an SSH key into root's authorized_keys file.
+
+        instance  An instance of nova.compute.service.Instance
+        key       The SSH key to inject.
+        """
+        sshdir = os.path.join(FLAGS.ovz_ve_private_dir,
+                              str(instance['id']), 'root', '.ssh')
+        utils.execute('mkdir', '-p', sshdir, run_as_root=True)
+        utils.execute('chown', 'root', sshdir, run_as_root=True)
+        utils.execute('chmod', '700', sshdir, run_as_root=True)
+        keyfile = os.path.join(sshdir, 'authorized_keys')
+
+        key_data = ''.join([
+            '\n',
+            '# The following ssh key was injected by Nova OpenVZ driver',
+            '\n',
+            key.strip(),
+            '\n',
+        ])
+
+        LOG.debug(_('Injecting root SSH key'))
+        args = ['-a', keyfile]
+        kwargs = dict(process_input=key_data, run_as_root=True)
+        utils.execute('tee', *args, **kwargs)
 
     def inject_file(self, instance, b64_path, b64_contents):
         """
