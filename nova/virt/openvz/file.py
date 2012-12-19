@@ -179,25 +179,7 @@ class OVZFile(object):
         if not path:
             path = self.filename
         basedir = os.path.dirname(path)
-        self.make_dir(basedir)
-
-    @staticmethod
-    def make_dir(path):
-        """
-        This is the method that actually creates directories. This is used by
-        make_path and can be called directly as a utility to create
-        directories.
-
-        Run the command:
-
-        mkdir -p <path>
-
-        If this doesn't run an exception is raised as this path creation is
-        required to ensure that other file operations are successful. Such
-        as creating the path for a file yet to be created.
-        """
-        if not os.path.exists(path):
-            ovz_utils.execute('mkdir', '-p', path, run_as_root=True)
+        ovz_utils.make_dir(basedir)
 
     def set_contents(self, new_contents):
         """

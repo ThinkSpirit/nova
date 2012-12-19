@@ -74,20 +74,22 @@ class OVZISCSIStorageDriver(OVZVolume):
         self.discover_volume()
         self.init_volume()
 
-    def _run_iscsiadm(self, iscsi_command):
+    def _run_iscsiadm(self, iscsi_command, raise_on_error=True):
         out = ovz_utils.execute('iscsiadm', '-m', 'node', '-T',
                                 self.iscsi_properties['target_iqn'],
                                 '-p', self.iscsi_properties['target_portal'],
                                 *iscsi_command, run_as_root=True,
-                                attempts=FLAGS.ovz_iscsiadm_num_tries)
+                                attempts=FLAGS.ovz_iscsiadm_num_tries,
+                                raise_on_error=raise_on_error)
         LOG.debug("iscsiadm %s: stdout=%s" %
                   (iscsi_command, out))
         return out
 
-    def _iscsiadm_update(self, property_key, property_value):
+    def _iscsiadm_update(self, property_key, property_value,
+                         raise_on_error=True):
         iscsi_command = ('--op', 'update', '-n', property_key,
                          '-v', property_value)
-        return self._run_iscsiadm(iscsi_command)
+        return self._run_iscsiadm(iscsi_command, raise_on_error=raise_on_error)
 
     def get_iscsi_properties_for_volume(self):
         if not self.iscsi_properties['target_discovered']:
@@ -134,9 +136,10 @@ class OVZISCSIStorageDriver(OVZVolume):
     @synchronized('iscsiadm_lock')
     def disconnect_iscsi_volume(self):
         """Detach the volume from instance_name"""
+        self.init_volume()
         self._iscsiadm_update("node.startup", "manual")
-        self._run_iscsiadm(("--logout",))
-        self._run_iscsiadm(('--op', 'delete'))
+        self._run_iscsiadm(("--logout",), raise_on_error=False)
+        self._run_iscsiadm(('--op', 'delete'), raise_on_error=False)
 
     @synchronized('iscsiadm_lock')
     def rescan(self):

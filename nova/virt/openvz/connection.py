@@ -19,19 +19,20 @@
 A driver specific to OpenVz as the support for Ovz in libvirt
 is sketchy at best.
 """
-
 import os
 import fnmatch
 import socket
 import json
+import math
+import time
 from base64 import b64decode, b64encode
 from nova import flags
 from nova.openstack.common import cfg
 from nova import db
 from nova import exception
-from nova.openstack.common import log as logging
 from nova import utils
 from nova.openstack.common import importutils
+from nova.openstack.common import log as logging
 from nova import context
 from nova.compute import power_state
 from nova.compute import instance_types
@@ -45,6 +46,8 @@ from nova.virt.openvz.file import OVZFile
 from nova.virt.openvz.file_ext.boot import OVZBootFile
 from nova.virt.openvz.file_ext.shutdown import OVZShutdownFile
 from nova.virt.openvz.network_drivers.tc import OVZTcRules
+from nova.virt.openvz.migration import OVZMigration
+from nova.virt.openvz.volume_ops import OVZInstanceVolumeOps
 
 openvz_conn_opts = [
     cfg.StrOpt('ovz_template_path',
@@ -90,9 +93,25 @@ openvz_conn_opts = [
     cfg.StrOpt('injected_network_template',
                default='$pybasedir/nova/virt/interfaces.template',
                help='Template for injected network template'),
+    cfg.StrOpt('ovz_dump_dir',
+               default='/var/lib/vz/dump',
+               help='Directory to use for temporary storage for migrations'),
+    cfg.StrOpt('ovz_tmp_dir',
+               default='/var/tmp',
+               help='Directory to use as temporary storage'),
+    cfg.StrOpt('ovz_migration_transport',
+               default='rsync',
+               help='Method to use when migrating a guest image'),
     cfg.StrOpt('ovz_vzmigrate_opts',
                default=None,
                help='Optional arguments to pass to vzmigrate'),
+    cfg.StrOpt('ovz_migration_user',
+               default='root',
+               help='User that will be used to perform migrations'),
+    cfg.StrOpt('ovz_migration_method',
+               default='python',
+               help='Method of migration to use, ' \
+                    'valid choices are "python" and "vzmigrate"'),
     cfg.BoolOpt('ovz_online_migration',
                 default=True,
                 help='Perform an online migration of a container'),
@@ -157,9 +176,19 @@ openvz_conn_opts = [
     cfg.IntOpt('ovz_tc_max_line_speed',
                default=1000,
                help='Line speed in Mbit'),
+    cfg.IntOpt('ovz_file_descriptors_per_unit',
+               default=4096,
+               help='Max open file descriptors per memory unit'),
+    cfg.IntOpt('ovz_rsync_iterations',
+               default=1,
+               help='Number of times to rsync a container when migrating'),
     cfg.FloatOpt('ovz_disk_space_oversub_percent',
                  default=1.10,
-                 help='Local disk over subscription percentage')
+                 help='Local disk over subscription percentage'),
+    cfg.FloatOpt('ovz_cpulimit_overcommit_multiplier',
+                 default=1.0,
+                 help='Multiplier for cpulimit to facilitate over ' \
+                      'committing cpu resources')
 ]
 
 FLAGS = flags.FLAGS
@@ -173,7 +202,10 @@ def get_connection(read_only):
 
 
 class OpenVzConnection(driver.ComputeDriver):
-    def __init__(self, read_only):
+    # OpenVz sets the upper limit of cpuunits to 500000
+    MAX_CPUUNITS = 500000
+
+    def __init__(self, read_only=False):
         """
         Create an instance of the openvz connection.
         """
@@ -184,6 +216,12 @@ class OpenVzConnection(driver.ComputeDriver):
         self.read_only = read_only
         self.vif_driver = importutils.import_object(FLAGS.ovz_vif_driver)
         LOG.debug(_('__init__ complete in OpenVzConnection'))
+
+    def legacy_nwinfo(self):
+        """
+        Indicate if the driver requires the legacy network_info format.
+        """
+        return True
 
     def init_host(self, host=socket.gethostname()):
         """
@@ -221,7 +259,8 @@ class OpenVzConnection(driver.ComputeDriver):
                 # but it actually isn't then we need to attach volumes to
                 # the host and then start the container.
                 if instance['power_state'] == power_state.RUNNING:
-                    self._reattach_volumes_for_instance(instance)
+                    volumes = OVZInstanceVolumeOps(instance)
+                    volumes.attach_all_volumes()
                     self._start(instance)
 
             # Check what the local state is to verify that it is running,
@@ -359,8 +398,8 @@ class OpenVzConnection(driver.ComputeDriver):
         host_stats['hypervisor_hostname'] = self.host
         self.host_stats = host_stats.copy()
 
-    def spawn(self, context, instance, image_meta, network_info=None,
-              block_device_mapping=None):
+    def spawn(self, context, instance, image_meta, injected_files,
+              admin_password, network_info=None, block_device_info=None):
         """
         Create a new virtual environment on the container platform.
 
@@ -413,23 +452,19 @@ class OpenVzConnection(driver.ComputeDriver):
         self._set_instance_size(instance)
         self._set_onboot(instance)
 
-        if block_device_mapping:
-            self._attach_volumes(instance['name'], block_device_mapping)
+        if block_device_info:
+            self._attach_volumes(instance['name'], block_device_info)
 
-        files_to_inject = instance.get('injected_files')
-        if files_to_inject:
-            self._inject_files(instance, files_to_inject)
-
-        if instance['key_data']:
-            self._inject_ssh_key(instance, str(instance['key_data']))
+        if injected_files:
+            self._inject_files(instance, injected_files)
 
         self._start(instance)
         self._initial_secure_host(instance)
         self._gratuitous_arp_all_addresses(instance, network_info)
 
-        if instance['admin_pass']:
+        if admin_password:
             self.set_admin_password(context, instance['id'],
-                                    instance['admin_pass'])
+                                    admin_password)
 
         # Begin making our looping async call
         timer = utils.LoopingCall(f=None)
@@ -827,6 +862,28 @@ class OpenVzConnection(driver.ComputeDriver):
             raise exception.InstanceUnacceptable(
                 _("Instance size reset FAILED"))
 
+    def _set_numflock(self, instance, max_file_descriptors):
+        """
+        Run the command:
+
+        vzctl set <ctid> --save --numflock <number>
+        """
+
+        ovz_utils.execute('vzctl', 'set', instance['id'], '--save',
+                          '--numflock', max_file_descriptors,
+                          run_as_root=True)
+
+    def _set_numfiles(self, instance, max_file_descriptors):
+        """
+        Run the command:
+
+        vzctl set <ctid> --save --numfile <number>
+        """
+
+        ovz_utils.execute('vzctl', 'set', instance['id'], '--save',
+                          '--numfile', max_file_descriptors,
+                          run_as_root=True)
+
     def _set_instance_size(self, instance, instance_type_id=None,
                            network_info=None):
         """
@@ -846,9 +903,15 @@ class OpenVzConnection(driver.ComputeDriver):
         percent_of_resource = self._percent_of_resource(
             instance_type['memory_mb'])
 
+        instance_memory_mb = int(instance_type['memory_mb'])
+        memory_unit_size = int(FLAGS.ovz_memory_unit_size)
+        max_fd_per_unit = int(FLAGS.ovz_file_descriptors_per_unit)
+        max_fd = int(instance_memory_mb / memory_unit_size) * max_fd_per_unit
         self._set_vmguarpages(instance, instance_memory_pages)
         self._set_privvmpages(instance, instance_memory_pages)
         self._set_kmemsize(instance, instance_memory_bytes)
+        self._set_numfiles(instance, max_fd)
+        self._set_numflock(instance, max_fd)
         if FLAGS.ovz_use_cpuunit:
             self._set_cpuunits(instance, percent_of_resource)
         if FLAGS.ovz_use_cpulimit:
@@ -856,47 +919,53 @@ class OpenVzConnection(driver.ComputeDriver):
         if FLAGS.ovz_use_cpus:
             self._set_cpus(instance, instance_type['vcpus'])
         if FLAGS.ovz_use_ioprio:
-            self._set_ioprio(instance, percent_of_resource)
+            self._set_ioprio(instance, int(instance_type['memory_mb']))
         if FLAGS.ovz_use_disk_quotas:
             self._set_diskspace(instance, instance_type)
 
         if network_info:
-            LOG.debug(_('Setting network sizing'))
-            bf = OVZBootFile(instance['id'], 755)
-            sf = OVZShutdownFile(instance['id'], 755)
-            with sf:
-                LOG.debug(_('Cleaning TC rules for %s') % instance['id'])
-                sf.read()
-                sf.run_contents()
-                sf.set_contents(list())
+            self._generate_tc_rules(instance, network_info)
 
+    def _generate_tc_rules(self, instance, network_info):
+        """
+        Utility method to generate tc info for instances that have been
+        resized and/or migrated
+        """
+        LOG.debug(_('Setting network sizing'))
+        bf = OVZBootFile(instance['id'], 755)
+        sf = OVZShutdownFile(instance['id'], 755)
+        with sf:
+            LOG.debug(_('Cleaning TC rules for %s') % instance['id'])
+            sf.read()
+            sf.run_contents()
+            sf.set_contents(list())
+
+        with bf:
+            bf.set_contents(list())
+
+        LOG.debug(_('Getting network dict for: %s') % instance['id'])
+        interfaces = ovz_utils.generate_network_dict(instance['id'],
+                                                     network_info)
+        for net_dev in interfaces:
+            LOG.debug(_('Adding tc rules for: %s') %
+                      net_dev['vz_host_if'])
+            tc = OVZTcRules()
+            tc.instance_info(net_dev['id'], net_dev['address'],
+                             net_dev['vz_host_if'])
             with bf:
-                bf.set_contents(list())
-
-            LOG.debug(_('Getting network dict for: %s') % instance['id'])
-            interfaces = ovz_utils.generate_network_dict(instance['id'],
-                                                         network_info)
-            for net_dev in interfaces:
-                LOG.debug(_('Adding tc rules for: %s') %
-                          net_dev['vz_host_if'])
-                tc = OVZTcRules()
-                tc.instance_info(net_dev['id'], net_dev['address'],
-                                 net_dev['vz_host_if'])
-                with bf:
-                    bf.append(tc.container_start())
-
-                with sf:
-                    sf.append(tc.container_stop())
-
-            with bf:
-                LOG.debug(_('Running TC rules for: %s') % instance['id'])
-                bf.run_contents()
-                LOG.debug(_('Saving TC rules for: %s') % instance['id'])
-                bf.write()
+                bf.append(tc.container_start())
 
             with sf:
-                sf.write()
+                sf.append(tc.container_stop())
 
+        with bf:
+            LOG.debug(_('Running TC rules for: %s') % instance['id'])
+            bf.run_contents()
+            LOG.debug(_('Saving TC rules for: %s') % instance['id'])
+            bf.write()
+
+        with sf:
+            sf.write()
 
     def _set_vmguarpages(self, instance, num_pages):
         """
@@ -973,16 +1042,13 @@ class OpenVzConnection(driver.ComputeDriver):
         sauce to constraining each container within it's subscribed slice of
         the host node.
         """
-
-        cpuunits = ovz_utils.get_cpuunits_capability()
-
-        LOG.debug(_('Reported cpuunits %s') % cpuunits['total'])
+        LOG.debug(_('Reported cpuunits %s') % self.MAX_CPUUNITS)
         LOG.debug(_('Reported percent of resource: %s') % percent_of_resource)
 
-        units = int(cpuunits['total'] * percent_of_resource)
+        units = int(round(self.MAX_CPUUNITS * percent_of_resource))
 
-        if units > cpuunits['total']:
-            units = cpuunits['total']
+        if units > self.MAX_CPUUNITS:
+            units = self.MAX_CPUUNITS
 
         ovz_utils.execute('vzctl', 'set', instance['id'], '--save',
                           '--cpuunits', units, run_as_root=True)
@@ -1003,7 +1069,9 @@ class OpenVzConnection(driver.ComputeDriver):
         the host node.
         """
 
-        cpulimit = int(self.utility['CPULIMIT'] * percent_of_resource)
+        cpulimit = int(round(
+            (self.utility['CPULIMIT'] * percent_of_resource) *
+            FLAGS.ovz_cpulimit_overcommit_multiplier))
 
         if cpulimit > self.utility['CPULIMIT']:
             cpulimit = self.utility['CPULIMIT']
@@ -1011,7 +1079,7 @@ class OpenVzConnection(driver.ComputeDriver):
         ovz_utils.execute('vzctl', 'set', instance['id'], '--save',
                           '--cpulimit', cpulimit, run_as_root=True)
 
-    def _set_cpus(self, instance, vcpus, multiplier=2):
+    def _set_cpus(self, instance, vcpus):
         """
         The number of logical cpus that are made available to the container.
         Default to showing 2 cpus to each container at a minimum.
@@ -1024,22 +1092,18 @@ class OpenVzConnection(driver.ComputeDriver):
         number of cores that are presented to each container and if this fails
         to set *ALL* cores will be presented to every container, that be bad.
         """
-
-        vcpus = vcpus * multiplier
-
         if vcpus > (self.utility['CPULIMIT'] / 100):
+            # We can't set cpus higher than the number of actual logical cores
+            # on the system so set a cap here
             vcpus = self.utility['CPULIMIT'] / 100
 
         ovz_utils.execute('vzctl', 'set', instance['id'], '--save', '--cpus',
                           vcpus, run_as_root=True)
 
-    def _set_ioprio(self, instance, percent_of_resource):
+    def _set_ioprio(self, instance, memory_mb):
         """
         Set the IO priority setting for a given container.  This is represented
-        by an integer between 0 and 7.  If no priority is given one will be
-        automatically calculated based on the percentage of allocated memory
-        for the container.
-
+        by an integer between 0 and 7.
         Run the command:
 
         vzctl set <ctid> --save --ioprio <iopriority>
@@ -1048,8 +1112,26 @@ class OpenVzConnection(driver.ComputeDriver):
         given the same weight by default which will cause bad performance
         across all containers when there is input/output contention.
         """
-        ioprio = int(
-            round(percent_of_resource * float(FLAGS.ovz_ioprio_limit)))
+        # The old algorithm made it impossible to distinguish between a
+        # 512MB container and a 2048MB container for IO priority.  We will
+        # for now follow a simple map to create a more non-linear
+        # relationship between the flavor sizes and their IO priority groups
+
+        # The IO priority of a container is grouped in 1 of 8 groups ranging
+        # from 0 to 7.  We can calculate an appropriate value by finding out
+        # how many ovz_memory_unit_size chunks are in the container's memory
+        # allocation and then using python's math library to solve for that
+        # number's logarithm.
+        num_chunks = int(memory_mb / FLAGS.ovz_memory_unit_size)
+
+        try:
+            ioprio = int(round(math.log(num_chunks, 2)))
+        except ValueError:
+            ioprio = 0
+
+        if ioprio > 7:
+            # ioprio can't be higher than 7 so set a ceiling
+            ioprio = 7
 
         ovz_utils.execute('vzctl', 'set', instance['id'], '--save', '--ioprio',
                           ioprio, run_as_root=True)
@@ -1098,7 +1180,8 @@ class OpenVzConnection(driver.ComputeDriver):
         ifaces_fh = OVZNetworkInterfaces(interfaces)
         ifaces_fh.add()
 
-    def reboot(self, instance, network_info, reboot_type):
+    def reboot(self, instance, network_info, reboot_type,
+               block_device_info=None):
         """
         Reboot the specified instance.
 
@@ -1166,33 +1249,6 @@ class OpenVzConnection(driver.ComputeDriver):
                              b64encode(file_to_inject[0]),
                              b64encode(file_to_inject[1]))
 
-    def _inject_ssh_key(self, instance, key):
-        """
-        Inject an SSH key into root's authorized_keys file.
-
-        instance  An instance of nova.compute.service.Instance
-        key       The SSH key to inject.
-        """
-        sshdir = os.path.join(FLAGS.ovz_ve_private_dir,
-                              str(instance['id']), 'root', '.ssh')
-        utils.execute('mkdir', '-p', sshdir, run_as_root=True)
-        utils.execute('chown', 'root', sshdir, run_as_root=True)
-        utils.execute('chmod', '700', sshdir, run_as_root=True)
-        keyfile = os.path.join(sshdir, 'authorized_keys')
-
-        key_data = ''.join([
-            '\n',
-            '# The following ssh key was injected by Nova OpenVZ driver',
-            '\n',
-            key.strip(),
-            '\n',
-        ])
-
-        LOG.debug(_('Injecting root SSH key'))
-        args = ['-a', keyfile]
-        kwargs = dict(process_input=key_data, run_as_root=True)
-        utils.execute('tee', *args, **kwargs)
-
     def inject_file(self, instance, b64_path, b64_contents):
         """
         Writes a file on the specified instance.
@@ -1212,49 +1268,6 @@ class OpenVzConnection(driver.ComputeDriver):
         with fh:
             fh.append(b64decode(b64_contents))
             fh.write()
-
-    def _reattach_volumes_for_instance(self, instance):
-        """
-        This is a helper method to look for volumes and do what is
-        necessary to reattach the underlying storage for them to be used
-        with a container.  Currently only used as a helper for init_host()
-        """
-        ctxt = context.get_admin_context()
-        volumes = db.volume_get_all_by_instance_uuid(ctxt,
-                                                     instance['uuid'])
-        connection_infos = db.block_device_mapping_get_all_by_instance(ctxt,
-                                                            instance['uuid'])
-        if volumes:
-            for volume in volumes:
-                connection_info = None
-                for info in connection_infos:
-                    if info['volume_id'] == volume['id']:
-                        LOG.debug(
-                            _('Found matching connection info for volume %s')
-                            % volume['id'])
-                        connection_info = info['connection_info']
-                if connection_info:
-                    LOG.debug(_('connection_info: %s') %
-                              connection_info)
-                    # Right now the connection info stuff is a json marshaled
-                    # string so if it is a string, lets load it proper
-                    if isinstance(connection_info, basestring):
-                        connection_info = json.loads(connection_info)
-                    # leave room for us to use other storage drivers in the
-                    # future, i.e. cifs, nfs, etc...
-                    if connection_info['driver_volume_type'] == 'iscsi':
-                        LOG.debug(_('Volume type is iSCSI'))
-                        from nova.virt.openvz.volume_drivers.iscsi\
-                        import OVZISCSIStorageDriver
-                        LOG.debug(_('iSCSI volume driver loaded'))
-                        vol = OVZISCSIStorageDriver(connection_info,
-                                                    instance['id'],
-                                                    volume['mountpoint'])
-                        vol.discover_volume()
-                        LOG.debug(_('Attached volume: %s') % volume['id'])
-                    else:
-                        LOG.warn(_('Cannot attach volume: %s') %
-                                 volume['id'])
 
     def set_admin_password(self, context, instance_id, new_pass=None):
         """
@@ -1295,13 +1308,41 @@ class OpenVzConnection(driver.ComputeDriver):
         """
         suspend the specified instance
         """
-        self._stop(instance)
+        # grab an admin context to update the database
+        admin_context = context.get_admin_context()
+
+        # Suspend the instance
+        ovz_utils.execute('vzctl', 'chkpnt', instance['id'],
+                          '--suspend', run_as_root=True)
+
+        # Set the instance power state to suspended for accurate reporting
+        try:
+            db.instance_update(admin_context, instance['uuid'],
+                    {'power_state': power_state.SUSPENDED})
+        except exception.InstanceNotFound as err:
+            LOG.error(_('Instance %s not found in the database') %
+                      instance['id'])
+            LOG.error(err)
 
     def resume(self, instance):
         """
         resume the specified instance
         """
-        self._start(instance)
+        # grab an admin context to update the database
+        admin_context = context.get_admin_context()
+
+        # Resume the instance
+        ovz_utils.execute('vzctl', 'chkpnt', instance['id'],
+                          '--resume', run_as_root=True)
+
+        # Set the instance power state to running
+        try:
+            db.instance_update(admin_context, instance['uuid'],
+                    {'power_state': power_state.RUNNING})
+        except exception.InstanceNotFound as err:
+            LOG.error(_('Instance %s not found in the database') %
+                      instance['id'])
+            LOG.error(err)
 
     def _clean_orphaned_files(self, instance_id):
         """
@@ -1409,8 +1450,7 @@ class OpenVzConnection(driver.ComputeDriver):
                     LOG.debug(_('Ve stopped'))
 
                 LOG.debug(_('Attempting to destroy container'))
-                ovz_utils.execute('vzctl', 'destroy', instance['id'],
-                                  run_as_root=True)
+                self._destroy(instance['id'])
             except ProcessExecutionError as err:
                 LOG.error(_('There was an error with the destroy process'))
                 LOG.error(_(err))
@@ -1438,11 +1478,15 @@ class OpenVzConnection(driver.ComputeDriver):
 
         self._clean_orphaned_files(instance['id'])
         if block_device_mapping:
-            for volume in block_device_mapping['block_device_mapping']:
-                self.terminate_volume_conn(volume['connection_info'],
-                                           instance['id'],
-                                           mountpoint=volume['mount_device'])
+            volumes = OVZInstanceVolumeOps(instance)
+            volumes.detach_all_volumes()
             self._clean_orphaned_directories(instance['id'])
+
+    def _destroy(self, instance_id):
+        """
+        Run destroy on the instance
+        """
+        ovz_utils.execute('vzctl', 'destroy', instance_id, run_as_root=True)
 
     def _attach_volumes(self, instance_name, block_device_mapping):
         """
@@ -1510,23 +1554,6 @@ class OpenVzConnection(driver.ComputeDriver):
         volume.setup()
         volume.detach()
         volume.write_and_close()
-
-    def terminate_volume_conn(self, connection_info, id, mountpoint=None):
-        """
-        Terminate the volume client session
-        """
-        # Create a default mountpoint if none exists
-        if not mountpoint:
-            mountpoint = connection_info['mount_device']
-
-        if connection_info['driver_volume_type'] == 'iscsi':
-            from nova.virt.openvz.volume_drivers.iscsi\
-            import OVZISCSIStorageDriver
-            volume = OVZISCSIStorageDriver(connection_info, id, mountpoint)
-            volume.disconnect_iscsi_volume()
-        else:
-            raise NotImplementedError(
-                _('There are no suitable storage drivers'))
 
     def get_info(self, instance):
         """
@@ -1602,8 +1629,8 @@ class OpenVzConnection(driver.ComputeDriver):
         someone choose to do so, they can adjust the container's cpu usage
         up or down.
         """
-        cont_mem_mb = float(instance_memory) /\
-                      float(ovz_utils.get_memory_mb_total())
+        cont_mem_mb = (float(instance_memory) /
+                      float(ovz_utils.get_memory_mb_total()))
 
         # We shouldn't ever have more than 100% but if for some unforseen
         # reason we do, lets limit it to 1 to make all of the other
@@ -1651,13 +1678,18 @@ class OpenVzConnection(driver.ComputeDriver):
                             self.utility[int(line[0])] = dict()
                         self.utility[int(line[0])] = int(line[1])
 
-
     def migrate_disk_and_power_off(self, context, instance, dest,
-                                   instance_type, network_info):
+                                   instance_type, network_info,
+                                   block_device_info=None):
         """
         Transfers the disk of a running instance in multiple phases, turning
         off the instance before the end.
         """
+        LOG.debug(_('Migration context: %s') % context)
+        LOG.debug(_('Migration instance: %s') % instance)
+        LOG.debug(_('Migration dest: %s') % dest)
+        LOG.debug(_('Migration instance_type: %s') % instance_type)
+        LOG.debug(_('Migration network_info: %s') % network_info)
 
         if not dest:
             # There is no destination for the migration, can't do anything
@@ -1670,11 +1702,59 @@ class OpenVzConnection(driver.ComputeDriver):
                                              'resize_in_place')
             return
 
-        LOG.debug(_('Migration context: %s') % context)
-        LOG.debug(_('Migration instance: %s') % instance)
-        LOG.debug(_('Migration dest: %s') % dest)
-        LOG.debug(_('Migration instance_type: %s') % instance_type)
-        LOG.debug(_('Migration network_info: %s') % network_info)
+        # Validate the ovz_migration_method flag
+        if FLAGS.ovz_migration_method not in ['vzmigrate', 'python']:
+            raise exception.MigrationError(
+                _('I do not understand your migration method'))
+
+        # Find out if we have external volumes, this will determine
+        # if we will freeze the instance and attempt to preserve state of if
+        # we will stop the instance completely to preserve the integrity
+        # of the attached filesystems.
+        volumes = OVZInstanceVolumeOps(instance)
+        if volumes.volume_list():
+            live_migration = False
+            self._stop(instance)
+        else:
+            live_migration = True
+            self.suspend(instance)
+
+        LOG.debug(_('ovz_migration_method is: %s') %
+                  FLAGS.ovz_migration_method)
+        if FLAGS.ovz_migration_method == 'vzmigrate':
+            self._vzmigration_send_to_host(instance, dest)
+        elif FLAGS.ovz_migration_method == 'python':
+            self._pymigration_send_to_host(instance,
+                              ovz_utils.generate_network_dict(instance['id'],
+                                                              network_info),
+                              dest, live_migration)
+
+        if not live_migration:
+            # This is not a live migration so before the destination host can
+            # start restoring things it needs to reattach all the volumes which
+            # means the source host has to unmount them and logout of any
+            # fileserver/SAN sessions
+            volumes.detach_all_volumes()
+
+    def _pymigration_send_to_host(self, instance, network_info, dest,
+                                  live_migration):
+        """
+        This performs a more complex but more secure migration using a pure
+        python implemented vz migration driver.
+        """
+        LOG.debug(_('Beginning pure python based migration'))
+        migration = OVZMigration(instance, network_info, dest, live_migration)
+        migration.dump_and_transfer_instance()
+        migration.send()
+
+    def _vzmigration_send_to_host(self, instance, dest):
+        """
+        This performs a simple migration using openvz's supplied vzmigrate
+        script.  It requires shared keys for root across all hosts and
+        does not support containers with externally attached volumes. And
+        currently TC rules aren't preserved.
+        """
+        LOG.debug(_('Beginning vzmigrate based migration'))
         cmd = ['vzmigrate']
         if FLAGS.ovz_vzmigrate_opts:
             if isinstance(FLAGS.ovz_vzmigrate_opts, str):
@@ -1695,22 +1775,9 @@ class OpenVzConnection(driver.ComputeDriver):
         out = ovz_utils.execute(*cmd, run_as_root=True)
         LOG.debug(_('Output from migration process: %s') % out)
 
-        self._clean_orphaned_files(instance['id'])
-        self._clean_orphaned_directories(instance['id'])
-
-    def snapshot(self, context, instance, image_id):
-        """
-        Snapshots the specified instance.
-
-        :param context: security context
-        :param instance: Instance object as returned by DB layer.
-        :param image_id: Reference to a pre-created image that will
-                         hold the snapshot.
-        """
-        raise NotImplementedError()
-
     def finish_migration(self, context, migration, instance, disk_info,
-                         network_info, image_meta, resize_instance):
+                         network_info, image_meta, resize_instance,
+                         block_device_info=None):
         """Completes a resize, turning on the migrated instance
 
         :param network_info:
@@ -1727,13 +1794,72 @@ class OpenVzConnection(driver.ComputeDriver):
             # This is a resize on the same host so its simple, resize
             # in place and then exit the method
             self._set_instance_size(instance, None, network_info)
-            if ovz_utils.remove_instance_metadata_key(instance['id'],
-                                                      'migration_type'):
-                LOG.debug(_('Removed migration_type metadata'))
-            else:
-                LOG.debug(_('Failed to remove migration_type metadata'))
             return
 
+        volumes = OVZInstanceVolumeOps(instance)
+        if volumes.volume_list():
+            # The migration was forced to be offline so as to preserve the
+            # integrity of externally attached volumes.  So we need to
+            # reattach the volumes to the host so the instance can bind
+            # mount them.
+            live_migration = False
+            volumes.attach_all_volumes()
+        else:
+            live_migration = True
+
+        if FLAGS.ovz_migration_method == 'vzmigrate':
+            self._vzmigrate_setup_dest_host(instance, network_info)
+        elif FLAGS.ovz_migration_method == 'python':
+            self._pymigrate_finish_migration(instance,
+                                             network_info,
+                                             live_migration)
+
+        # Somehow the name of the instance is lost in migration so
+        # set it here.
+        self._set_name(instance)
+
+        if resize_instance:
+            LOG.debug(_('A resize after migration was requested: %s') %
+                      instance['id'])
+            self._set_instance_size(instance, None, network_info)
+            LOG.debug(_('Resized instance after migration: %s') %
+                      instance['id'])
+        else:
+            LOG.debug(_('Regenerating TC rules for instance %s') %
+                      instance['id'])
+            self._generate_tc_rules(instance, network_info)
+            LOG.debug(_('Regenerated TC rules for instance %s') %
+                      instance['id'])
+
+        if not live_migration:
+            self._start(instance)
+
+    def _pymigrate_finish_migration(self, instance, network_info,
+                                    live_migration):
+        """
+        Take all transferred files and put them back into place to create a
+        working instance.
+        """
+        LOG.debug(_('Beginning python based finish_migration'))
+        interfaces = ovz_utils.generate_network_dict(instance['id'],
+                                                     network_info)
+        migration = OVZMigration(instance, interfaces, None, live_migration)
+        migration.create_instance_mountpoints()
+        migration.undump_instance()
+
+        # Crude but we just need to give things time to settle before cleaning
+        # up all the dumped stuff
+        # TODO(imsplitbit): maybe a wait_for_start method with a looping
+        # timer is better here, will check into it soon
+        time.sleep(5)
+        migration.cleanup_destination()
+        LOG.debug(_('Finished python based finish_migration'))
+
+    def _vzmigrate_setup_dest_host(self, instance, network_info):
+        """
+        Sequence to run on destination host should the migration be done
+        by the vzmigrate tools.
+        """
         LOG.debug(_('Stopping instance: %s') % instance['id'])
         self._stop(instance)
         LOG.debug(_('Stopped instance: %s') % instance['id'])
@@ -1744,70 +1870,118 @@ class OpenVzConnection(driver.ComputeDriver):
         self._start(instance)
         LOG.debug(_('Started instance: %s') % instance['id'])
 
-        if resize_instance:
-            LOG.debug(_('A resize after migration was requested: %s') %
-                      instance['id'])
-            self._set_instance_size(instance)
-            LOG.debug(_('Resized instance after migration: %s') %
-                      instance['id'])
-            LOG.debug(_('Restarting instance after resize/migration: %s') %
-                      instance['id'])
-            self.reboot(instance, network_info, 'HARD')
-            LOG.debug(_('Restarted instance after resize/migration: %s') %
-                      instance['id'])
-
     def confirm_migration(self, migration, instance, network_info):
-        """Confirms a resize, destroying the source VM"""
-        status = self.get_info(instance)
-        if not status['state'] == power_state.RUNNING:
-            raise exception.InstanceNotRunning(
-                _('Instance %s is not running after migration') %
-                instance['id'])
-        elif status['state'] == power_state.RUNNING:
-            db.instance_update(context.get_admin_context(), instance['uuid'],
-                    {'power_state': power_state.RUNNING})
+        """
+        Run on the source host to confirm the migration and cleans up the
+        the files from the source host.
+        """
+        LOG.debug(_('Beginning confirm migration for %s') % instance['id'])
+
+        # Get the instance metadata to see what we need to do
+        meta = ovz_utils.read_instance_metadata(instance['id'])
+        migration_type = meta.get('migration_type')
+
+        if migration_type == 'resize_in_place':
+            # This is a resize on the same host so its simple, resize
+            # in place and then exit the method
+            if ovz_utils.remove_instance_metadata_key(instance['id'],
+                                                      'migration_type'):
+                LOG.debug(_('Removed migration_type metadata'))
+            else:
+                LOG.debug(_('Failed to remove migration_type metadata'))
+            return
+
+        volumes = OVZInstanceVolumeOps(instance)
+        if volumes.volume_list():
+            # If we have external volumes we cannot do live migrations
+            live_migration = False
         else:
+            live_migration = True
+
+        try:
+            status = self.get_info(instance)['state']
+            if status == power_state.RUNNING or (
+                status == power_state.SHUTDOWN and not live_migration):
+                migration = OVZMigration(instance,
+                                         ovz_utils.generate_network_dict(
+                                             instance['id'], network_info),
+                                         None, live_migration)
+                migration.cleanup_source()
+                self._destroy(instance['id'])
+                self._clean_orphaned_files(instance['id'])
+                self._clean_orphaned_directories(instance['id'])
+            else:
+                LOG.warn(
+                    _('Check instance: %(instance_id)s, it may be broken. '
+                        'power_state: %(ps)s') %
+                    {'instance_id': instance['id'],
+                     'ps': status})
+        except exception.InstanceNotFound:
             LOG.warn(
-                _('Check instance: %(instance_id)s, it may be broken. '
-                  'power_state: %(ps)s') %
-                {'instance_id': instance['id'], 'ps': str(status['state'])})
+                _('Instance %s not found, migration cleaned itself up?') %
+                instance['id'])
+        except exception.InstanceUnacceptable:
+            LOG.error(_('Failed to stop and destroy the instance'))
+        LOG.debug(_('Finished confirm migration for %s') % instance['id'])
 
     def finish_revert_migration(self, instance, network_info):
         """Finish reverting a resize, powering back on the instance"""
-        # TODO(imsplitbit): make this thing go
-        raise NotImplementedError()
+        # Get the instance metadata to see what we need to do
+        LOG.debug(_('Beginning finish_revert_migration'))
+        meta = ovz_utils.read_instance_metadata(instance['id'])
+        migration_type = meta.get('migration_type')
 
-    def update_available_resource(self, ctxt, host):
-        """
-        Updates compute manager resource info on ComputeNode table.
+        if migration_type == 'resize_in_place':
+            # This is a resize on the same host so its simple, resize
+            # in place and then exit the method
+            LOG.debug(_('Reverting in-place migration for %s') %
+                      instance['id'])
+            self._set_instance_size(instance, None, network_info)
+            if ovz_utils.remove_instance_metadata_key(instance['id'],
+                                                      'migration_type'):
+                LOG.debug(_('Removed migration_type metadata'))
+                LOG.debug(_('Done reverting in-place migration for %s') %
+                          instance['id'])
+            else:
+                LOG.debug(_('Failed to remove migration_type metadata'))
+            return
 
-        This method is called as an periodic tasks and is used only
-        in live migration currently.
-
-        :param ctxt: security context
-        :param host: hostname that compute manager is currently running
-        """
-        # correct our internal hostname if it's wrong
-        if self.host != host:
-            self.host = host
-
-        try:
-            service_ref = db.service_get_all_compute_by_host(ctxt, host)[0]
-        except exception.NotFound:
-            raise exception.ComputeServiceUnavailable(host=host)
-
-        # Updating host information
-        self._refresh_host_stats()
-        dic = self.host_stats.copy()
-        dic['service_id'] = service_ref['id']
-
-        compute_node_ref = service_ref['compute_node']
-        if not compute_node_ref:
-            LOG.info(_('Compute_service record created for %s ') % host)
-            db.compute_node_create(ctxt, dic)
+        volumes = OVZInstanceVolumeOps(instance)
+        if volumes.volume_list():
+            LOG.debug(_('Instance %s has volumes') % instance['id'])
+            # the instance has external volumes and was not a live migration
+            # so we need to reattach external volumes
+            live_migration = False
+            volumes.attach_all_volumes()
         else:
-            LOG.info(_('Compute_service record updated for %s ') % host)
-            db.compute_node_update(ctxt, compute_node_ref[0]['id'], dic)
+            LOG.debug(_('Instance %s has no volumes') % instance['id'])
+            live_migration = True
+
+        migration = OVZMigration(instance,
+                                 ovz_utils.generate_network_dict(
+                                     instance['id'], network_info),
+                                 None, live_migration)
+
+        if live_migration:
+            LOG.debug(_('Resuming live migration for %s') % instance['id'])
+            self.resume(instance)
+        else:
+            LOG.debug(_('Starting instance %s, after revert') % instance['id'])
+            self._start(instance)
+
+        migration.cleanup_files()
+
+    #def update_available_resource(self, ctxt, host):
+    def get_available_resource(self):
+        """Retrieve resource info.
+
+        This method is called when nova-compute launches, and
+        as part of a periodic task.
+
+        :returns: dictionary describing resources
+
+        """
+        return self.get_host_stats(refresh=True)
 
     def get_volume_connector(self, instance):
         if not self._initiator:
@@ -2104,6 +2278,17 @@ class OpenVzConnection(driver.ComputeDriver):
 
     def snapshot_instance(self, context, instance_id, image_id):
         return
+
+    # The method to add to aggregates is not yet implemented,
+    # but the API needs to support it for the scheduler. We are
+    # adding this return in here so the driver does not complain
+    # when adding the aggregates to the API. The functionality of this
+    # is to only set the operational_state back to active
+    def add_to_aggregate(self, context, aggregate, host, **kwargs):
+        values = {
+            'operational_state': 'active',
+            }
+        db.aggregate_update(context, aggregate.id, values)
 
     def resize(self, instance, flavor):
         """

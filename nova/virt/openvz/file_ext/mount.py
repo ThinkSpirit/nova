@@ -22,6 +22,7 @@ is sketchy at best.
 
 from nova.openstack.common import log as logging
 from nova.virt.openvz.file_ext.mounts import OVZMounts
+from nova.virt.openvz import utils as ovz_utils
 from nova import flags
 
 FLAGS = flags.FLAGS
@@ -93,7 +94,7 @@ class OVZMountFile(OVZMounts):
         Create the host mount point if it doesn't exist.  This is required
         to allow for container startup.
         """
-        self.make_dir(self.host_mount)
+        ovz_utils.make_dir(self.host_mount)
 
     def make_container_mount_point(self):
         """
@@ -101,7 +102,7 @@ class OVZMountFile(OVZMounts):
         required to happen before the container starts so that when it chroots
         in /vz/root/CTID the path will exist to match container_root_mount
         """
-        self.make_dir(self.container_mount)
+        ovz_utils.make_dir(self.container_mount)
 
     def make_container_root_mount_point(self):
         """
@@ -111,4 +112,4 @@ class OVZMountFile(OVZMounts):
         # TODO(imsplitbit): Look for areas this can be used.  Right now the
         # process is very prescibed so it doesn't appear necessary just yet.
         # We will need this in the future when we do more dynamic operations.
-        self.make_dir(self.container_root_mount)
+        ovz_utils.make_dir(self.container_root_mount)

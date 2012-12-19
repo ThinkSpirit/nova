@@ -541,3 +541,65 @@ def generate_network_dict(instance_id, network_info):
                                              interface_info['name']))
             interfaces.append(interface_info)
     return interfaces
+
+
+def move(src, dest):
+    """
+    utility method to wrap up moving a file or directory from one place to
+    another.
+    """
+    try:
+        execute('mv', src, dest, run_as_root=True)
+        return True
+    except exception.InstanceUnacceptable as err:
+        LOG.error(_('Error moving file %s') % src)
+        LOG.error(err)
+        return False
+
+
+def copy(src, dest):
+    """
+    utility method wrap up copying files from one directory to another
+    """
+    try:
+        execute('cp', src, dest, run_as_root=True)
+        return True
+    except exception.InstanceUnacceptable as err:
+        LOG.error(_('Error copying file %s') % src)
+        LOG.error(err)
+        return False
+
+
+def tar(source, target_file, working_dir=None, skip_list=[]):
+    """
+    wrapper for tar for making backup archives
+    """
+    cmd = ['tar', '-cf', target_file]
+    if working_dir:
+        cmd += ['-C', working_dir]
+
+    if skip_list:
+        for exclude_path in skip_list:
+            cmd += ['--exclude', '%s/*' % exclude_path]
+
+    cmd.append(source)
+    try:
+        execute(*cmd, run_as_root=True)
+        return True
+    except exception.InstanceUnacceptable as err:
+        LOG.error(_('Error tarring: %s') % source)
+        LOG.error(err)
+        return False
+
+
+def untar(target_file, destination):
+    """
+    wrapper for untarring files into a destination directory
+    """
+    try:
+        execute('tar', '-xf', target_file, '-C', destination, run_as_root=True)
+        return True
+    except exception.InstanceUnacceptable as err:
+        LOG.error(_('Error untarring: %s') % target_file)
+        LOG.error(err)
+        return False
