@@ -22,7 +22,7 @@ from nova import exception
 from nova import flags
 from nova import test
 from nova.compute import power_state
-from nova.virt.openvz import connection as openvz_conn
+from nova.virt.openvz import driver as openvz_conn
 from nova.openstack.common import cfg
 from nova.virt.openvz.file import *
 from nova.virt.openvz.network_drivers.network_bridge import \
