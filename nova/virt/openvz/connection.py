@@ -24,7 +24,6 @@ import fnmatch
 import socket
 import json
 import math
-import time
 from base64 import b64decode, b64encode
 from nova import flags
 from nova.openstack.common import cfg
@@ -46,7 +45,6 @@ from nova.virt.openvz.file import OVZFile
 from nova.virt.openvz.file_ext.boot import OVZBootFile
 from nova.virt.openvz.file_ext.shutdown import OVZShutdownFile
 from nova.virt.openvz.network_drivers.tc import OVZTcRules
-from nova.virt.openvz.migration import OVZMigration
 from nova.virt.openvz.volume_ops import OVZInstanceVolumeOps
 
 openvz_conn_opts = [
@@ -93,35 +91,9 @@ openvz_conn_opts = [
     cfg.StrOpt('injected_network_template',
                default='$pybasedir/nova/virt/interfaces.template',
                help='Template for injected network template'),
-    cfg.StrOpt('ovz_dump_dir',
-               default='/var/lib/vz/dump',
-               help='Directory to use for temporary storage for migrations'),
     cfg.StrOpt('ovz_tmp_dir',
                default='/var/tmp',
                help='Directory to use as temporary storage'),
-    cfg.StrOpt('ovz_migration_transport',
-               default='rsync',
-               help='Method to use when migrating a guest image'),
-    cfg.StrOpt('ovz_vzmigrate_opts',
-               default=None,
-               help='Optional arguments to pass to vzmigrate'),
-    cfg.StrOpt('ovz_migration_user',
-               default='root',
-               help='User that will be used to perform migrations'),
-    cfg.StrOpt('ovz_migration_method',
-               default='python',
-               help='Method of migration to use, ' \
-                    'valid choices are "python" and "vzmigrate"'),
-    cfg.BoolOpt('ovz_online_migration',
-                default=True,
-                help='Perform an online migration of a container'),
-    cfg.BoolOpt('ovz_destroy_source_container_on_migrate',
-                default=True,
-                help='If a migration is successful do we delete the '\
-                     'container on the old host'),
-    cfg.BoolOpt('ovz_verbose_migration_logging',
-                default=True,
-                help='Log verbose messages from vzmigrate command'),
     cfg.BoolOpt('ovz_use_cpuunit',
                 default=True,
                 help='Use OpenVz cpuunits for guaranteed minimums'),
@@ -328,41 +300,6 @@ class OpenVzConnection(driver.ComputeDriver):
             ctids.append(ctid)
 
         return ctids
-
-    def list_instances_detail(self):
-        """
-        Satisfy the requirement for this method in the manager codebase.
-        This fascilitates the regular status polls that happen within the
-        manager code.
-
-        Execute the command:
-
-        vzlist --all -o name -H
-
-        If this fails to run an exception is raised because a failure to run is
-        disruptive to the driver's ability to support the instances on
-        the host through nova's interface.
-        """
-
-        # TODO(imsplitbit): need to ask around if this is the best way to do
-        # this.  This causes some redundant vzlist commands as get_info is run
-        # on every item returned from this command but it didn't make sense
-        # to re-implement get_info as get_info_all.
-        infos = list()
-        out = ovz_utils.execute('vzlist', '--all', '-o', 'ctid', '-H',
-                               run_as_root=True)
-        for ctid in out.splitlines():
-            ctid = ctid.split()[0]
-            try:
-                instance = db.instance_get(context.get_admin_context(), ctid)
-                status = self.get_info(instance)
-                infos.append(driver.InstanceInfo(instance['name'],
-                                                 status['state']))
-            except exception.InstanceNotFound as err:
-                LOG.error(_('Unable to find instance %s') % ctid)
-                LOG.error(err)
-
-        return infos
 
     def get_host_stats(self, refresh=False):
         """
@@ -1324,7 +1261,7 @@ class OpenVzConnection(driver.ComputeDriver):
                       instance['id'])
             LOG.error(err)
 
-    def resume(self, instance):
+    def resume(self, instance, network_info, block_device_info=None):
         """
         resume the specified instance
         """
@@ -1388,7 +1325,7 @@ class OpenVzConnection(driver.ComputeDriver):
 
         # Because we are using an rm -rf command lets do some simple validation
         validation_failed = False
-        if (isinstance(instance_id, str) or isinstance(instance_id, unicode)):
+        if isinstance(instance_id, str) or isinstance(instance_id, unicode):
             # We don't care if the instance id is a string or unicode as long
             # as it only contains numbers
             if not instance_id.isdigit():
@@ -1678,301 +1615,7 @@ class OpenVzConnection(driver.ComputeDriver):
                             self.utility[int(line[0])] = dict()
                         self.utility[int(line[0])] = int(line[1])
 
-    def migrate_disk_and_power_off(self, context, instance, dest,
-                                   instance_type, network_info,
-                                   block_device_info=None):
-        """
-        Transfers the disk of a running instance in multiple phases, turning
-        off the instance before the end.
-        """
-        LOG.debug(_('Migration context: %s') % context)
-        LOG.debug(_('Migration instance: %s') % instance)
-        LOG.debug(_('Migration dest: %s') % dest)
-        LOG.debug(_('Migration instance_type: %s') % instance_type)
-        LOG.debug(_('Migration network_info: %s') % network_info)
-
-        if not dest:
-            # There is no destination for the migration, can't do anything
-            raise exception.MigrationError(_('No destination'))
-
-        if dest == FLAGS.host:
-            # if this is an inplace resize we don't need to do any of this
-            LOG.debug(_('This is an inplace migration'))
-            ovz_utils.save_instance_metadata(instance['id'], 'migration_type',
-                                             'resize_in_place')
-            return
-
-        # Validate the ovz_migration_method flag
-        if FLAGS.ovz_migration_method not in ['vzmigrate', 'python']:
-            raise exception.MigrationError(
-                _('I do not understand your migration method'))
-
-        # Find out if we have external volumes, this will determine
-        # if we will freeze the instance and attempt to preserve state of if
-        # we will stop the instance completely to preserve the integrity
-        # of the attached filesystems.
-        volumes = OVZInstanceVolumeOps(instance)
-        if volumes.volume_list():
-            live_migration = False
-            self._stop(instance)
-        else:
-            live_migration = True
-            self.suspend(instance)
-
-        LOG.debug(_('ovz_migration_method is: %s') %
-                  FLAGS.ovz_migration_method)
-        if FLAGS.ovz_migration_method == 'vzmigrate':
-            self._vzmigration_send_to_host(instance, dest)
-        elif FLAGS.ovz_migration_method == 'python':
-            self._pymigration_send_to_host(instance,
-                              ovz_utils.generate_network_dict(instance['id'],
-                                                              network_info),
-                              dest, live_migration)
-
-        if not live_migration:
-            # This is not a live migration so before the destination host can
-            # start restoring things it needs to reattach all the volumes which
-            # means the source host has to unmount them and logout of any
-            # fileserver/SAN sessions
-            volumes.detach_all_volumes()
-
-    def _pymigration_send_to_host(self, instance, network_info, dest,
-                                  live_migration):
-        """
-        This performs a more complex but more secure migration using a pure
-        python implemented vz migration driver.
-        """
-        LOG.debug(_('Beginning pure python based migration'))
-        migration = OVZMigration(instance, network_info, dest, live_migration)
-        migration.dump_and_transfer_instance()
-        migration.send()
-
-    def _vzmigration_send_to_host(self, instance, dest):
-        """
-        This performs a simple migration using openvz's supplied vzmigrate
-        script.  It requires shared keys for root across all hosts and
-        does not support containers with externally attached volumes. And
-        currently TC rules aren't preserved.
-        """
-        LOG.debug(_('Beginning vzmigrate based migration'))
-        cmd = ['vzmigrate']
-        if FLAGS.ovz_vzmigrate_opts:
-            if isinstance(FLAGS.ovz_vzmigrate_opts, str):
-                cmd += FLAGS.ovz_vzmigrate_opts.split()
-            elif isinstance(FLAGS.ovz_vzmigrate_opts, list):
-                cmd += FLAGS.ovz_vzmigrate_opts
-        if FLAGS.ovz_online_migration:
-            cmd.append('--online')
-        if FLAGS.ovz_destroy_source_container_on_migrate:
-            cmd += ['-r', 'yes']
-        if FLAGS.ovz_verbose_migration_logging:
-            cmd.append('-v')
-        cmd.append(dest)
-        cmd.append(instance['id'])
-        LOG.debug(
-            _('Beginning the migration of %(instance_id)s to %(dest)s') %
-            {'instance_id': instance['id'], 'dest': dest})
-        out = ovz_utils.execute(*cmd, run_as_root=True)
-        LOG.debug(_('Output from migration process: %s') % out)
-
-    def finish_migration(self, context, migration, instance, disk_info,
-                         network_info, image_meta, resize_instance,
-                         block_device_info=None):
-        """Completes a resize, turning on the migrated instance
-
-        :param network_info:
-           :py:meth:`~nova.network.manager.NetworkManager.get_instance_nw_info`
-        :param image_meta: image object returned by nova.image.glance that
-                           defines the image from which this instance
-                           was created
-        """
-        # Get the instance metadata to see what we need to do
-        meta = ovz_utils.read_instance_metadata(instance['id'])
-        migration_type = meta.get('migration_type')
-
-        if migration_type == 'resize_in_place':
-            # This is a resize on the same host so its simple, resize
-            # in place and then exit the method
-            self._set_instance_size(instance, None, network_info)
-            return
-
-        volumes = OVZInstanceVolumeOps(instance)
-        if volumes.volume_list():
-            # The migration was forced to be offline so as to preserve the
-            # integrity of externally attached volumes.  So we need to
-            # reattach the volumes to the host so the instance can bind
-            # mount them.
-            live_migration = False
-            volumes.attach_all_volumes()
-        else:
-            live_migration = True
-
-        if FLAGS.ovz_migration_method == 'vzmigrate':
-            self._vzmigrate_setup_dest_host(instance, network_info)
-        elif FLAGS.ovz_migration_method == 'python':
-            self._pymigrate_finish_migration(instance,
-                                             network_info,
-                                             live_migration)
-
-        # Somehow the name of the instance is lost in migration so
-        # set it here.
-        self._set_name(instance)
-
-        if resize_instance:
-            LOG.debug(_('A resize after migration was requested: %s') %
-                      instance['id'])
-            self._set_instance_size(instance, None, network_info)
-            LOG.debug(_('Resized instance after migration: %s') %
-                      instance['id'])
-        else:
-            LOG.debug(_('Regenerating TC rules for instance %s') %
-                      instance['id'])
-            self._generate_tc_rules(instance, network_info)
-            LOG.debug(_('Regenerated TC rules for instance %s') %
-                      instance['id'])
-
-        if not live_migration:
-            self._start(instance)
-
-    def _pymigrate_finish_migration(self, instance, network_info,
-                                    live_migration):
-        """
-        Take all transferred files and put them back into place to create a
-        working instance.
-        """
-        LOG.debug(_('Beginning python based finish_migration'))
-        interfaces = ovz_utils.generate_network_dict(instance['id'],
-                                                     network_info)
-        migration = OVZMigration(instance, interfaces, None, live_migration)
-        migration.create_instance_mountpoints()
-        migration.undump_instance()
-
-        # Crude but we just need to give things time to settle before cleaning
-        # up all the dumped stuff
-        # TODO(imsplitbit): maybe a wait_for_start method with a looping
-        # timer is better here, will check into it soon
-        time.sleep(5)
-        migration.cleanup_destination()
-        LOG.debug(_('Finished python based finish_migration'))
-
-    def _vzmigrate_setup_dest_host(self, instance, network_info):
-        """
-        Sequence to run on destination host should the migration be done
-        by the vzmigrate tools.
-        """
-        LOG.debug(_('Stopping instance: %s') % instance['id'])
-        self._stop(instance)
-        LOG.debug(_('Stopped instance: %s') % instance['id'])
-
-        self.plug_vifs(instance, network_info)
-
-        LOG.debug(_('Starting instance: %s') % instance['id'])
-        self._start(instance)
-        LOG.debug(_('Started instance: %s') % instance['id'])
-
-    def confirm_migration(self, migration, instance, network_info):
-        """
-        Run on the source host to confirm the migration and cleans up the
-        the files from the source host.
-        """
-        LOG.debug(_('Beginning confirm migration for %s') % instance['id'])
-
-        # Get the instance metadata to see what we need to do
-        meta = ovz_utils.read_instance_metadata(instance['id'])
-        migration_type = meta.get('migration_type')
-
-        if migration_type == 'resize_in_place':
-            # This is a resize on the same host so its simple, resize
-            # in place and then exit the method
-            if ovz_utils.remove_instance_metadata_key(instance['id'],
-                                                      'migration_type'):
-                LOG.debug(_('Removed migration_type metadata'))
-            else:
-                LOG.debug(_('Failed to remove migration_type metadata'))
-            return
-
-        volumes = OVZInstanceVolumeOps(instance)
-        if volumes.volume_list():
-            # If we have external volumes we cannot do live migrations
-            live_migration = False
-        else:
-            live_migration = True
-
-        try:
-            status = self.get_info(instance)['state']
-            if status == power_state.RUNNING or (
-                status == power_state.SHUTDOWN and not live_migration):
-                migration = OVZMigration(instance,
-                                         ovz_utils.generate_network_dict(
-                                             instance['id'], network_info),
-                                         None, live_migration)
-                migration.cleanup_source()
-                self._destroy(instance['id'])
-                self._clean_orphaned_files(instance['id'])
-                self._clean_orphaned_directories(instance['id'])
-            else:
-                LOG.warn(
-                    _('Check instance: %(instance_id)s, it may be broken. '
-                        'power_state: %(ps)s') %
-                    {'instance_id': instance['id'],
-                     'ps': status})
-        except exception.InstanceNotFound:
-            LOG.warn(
-                _('Instance %s not found, migration cleaned itself up?') %
-                instance['id'])
-        except exception.InstanceUnacceptable:
-            LOG.error(_('Failed to stop and destroy the instance'))
-        LOG.debug(_('Finished confirm migration for %s') % instance['id'])
-
-    def finish_revert_migration(self, instance, network_info):
-        """Finish reverting a resize, powering back on the instance"""
-        # Get the instance metadata to see what we need to do
-        LOG.debug(_('Beginning finish_revert_migration'))
-        meta = ovz_utils.read_instance_metadata(instance['id'])
-        migration_type = meta.get('migration_type')
-
-        if migration_type == 'resize_in_place':
-            # This is a resize on the same host so its simple, resize
-            # in place and then exit the method
-            LOG.debug(_('Reverting in-place migration for %s') %
-                      instance['id'])
-            self._set_instance_size(instance, None, network_info)
-            if ovz_utils.remove_instance_metadata_key(instance['id'],
-                                                      'migration_type'):
-                LOG.debug(_('Removed migration_type metadata'))
-                LOG.debug(_('Done reverting in-place migration for %s') %
-                          instance['id'])
-            else:
-                LOG.debug(_('Failed to remove migration_type metadata'))
-            return
-
-        volumes = OVZInstanceVolumeOps(instance)
-        if volumes.volume_list():
-            LOG.debug(_('Instance %s has volumes') % instance['id'])
-            # the instance has external volumes and was not a live migration
-            # so we need to reattach external volumes
-            live_migration = False
-            volumes.attach_all_volumes()
-        else:
-            LOG.debug(_('Instance %s has no volumes') % instance['id'])
-            live_migration = True
-
-        migration = OVZMigration(instance,
-                                 ovz_utils.generate_network_dict(
-                                     instance['id'], network_info),
-                                 None, live_migration)
-
-        if live_migration:
-            LOG.debug(_('Resuming live migration for %s') % instance['id'])
-            self.resume(instance)
-        else:
-            LOG.debug(_('Starting instance %s, after revert') % instance['id'])
-            self._start(instance)
-
-        migration.cleanup_files()
-
-    #def update_available_resource(self, ctxt, host):
-    def get_available_resource(self):
+    def get_available_resource(self, nodename):
         """Retrieve resource info.
 
         This method is called when nova-compute launches, and
@@ -2012,7 +1655,8 @@ class OpenVzConnection(driver.ComputeDriver):
         # TODO(imsplitbit): Need to implement vzdump
         pass
 
-    def rescue(self, context, instance, network_info, image_meta):
+    def rescue(self, context, instance, network_info, image_meta,
+               rescue_password):
         """
         Rescue the specified instance.
         """
@@ -2153,7 +1797,7 @@ class OpenVzConnection(driver.ComputeDriver):
         """
         return True
 
-    def poll_rebooting_instances(self, timeout):
+    def poll_rebooting_instances(self, timeout, instances):
         """Poll for rebooting instances"""
         # TODO(Vek): Need to pass context in for access to auth_token
         return
