@@ -28,7 +28,7 @@ from nova import flags
 
 FLAGS = flags.FLAGS
 
-LOG = logging.getLogger('nova.virt.openvz.mounts')
+LOG = logging.getLogger('nova.virt.openvz.file_ext.mounts')
 
 
 class OVZMounts(OVZFile):

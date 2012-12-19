@@ -26,7 +26,7 @@ from nova.openstack.common import log as logging
 from nova.virt.openvz.file import OVZFile
 
 FLAGS = flags.FLAGS
-LOG = logging.getLogger('nova.virt.openvz.boot')
+LOG = logging.getLogger('nova.virt.openvz.file_ext.boot')
 
 
 class OVZBootFile(OVZFile):

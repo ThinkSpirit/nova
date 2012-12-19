@@ -25,7 +25,7 @@ from nova import flags
 from nova.virt.openvz.file import OVZFile
 
 FLAGS = flags.FLAGS
-LOG = logging.getLogger('nova.virt.openvz.shutdown')
+LOG = logging.getLogger('nova.virt.openvz.file_ext.shutdown')
 
 
 class OVZShutdownFile(OVZFile):

@@ -166,7 +166,7 @@ openvz_conn_opts = [
 FLAGS = flags.FLAGS
 FLAGS.register_opts(openvz_conn_opts)
 
-LOG = logging.getLogger('nova.virt.openvz.connection')
+LOG = logging.getLogger('nova.virt.openvz.driver')
 
 
 def get_connection(read_only):
