@@ -34,7 +34,7 @@ driver_opts = [
                help='Driver to use for controlling virtualization. Options '
                    'include: libvirt.LibvirtDriver, xenapi.XenAPIDriver, '
                    'fake.FakeDriver, baremetal.BareMetalDriver, '
-                   'vmwareapi.VMWareESXDriver'),
+                   'vmwareapi.VMWareESXDriver, openvz.OpenVzDriver'),
 ]
 
 CONF = cfg.CONF
