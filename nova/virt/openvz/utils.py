@@ -29,11 +29,11 @@ import re
 from nova import exception
 from nova import utils
 from nova.openstack.common import log as logging
-from nova import flags
+from nova.openstack.common import cfg
 from nova import context
 from nova import db
 
-FLAGS = flags.FLAGS
+CONF = cfg.CONF
 LOG = logging.getLogger('nova.virt.openvz.utils')
 
 
@@ -288,7 +288,7 @@ def get_local_gb_total():
 
     """
 
-    return get_local_gb(FLAGS.ovz_ve_private_dir)['total'] / (1024 ** 3)
+    return get_local_gb(CONF.ovz_ve_private_dir)['total'] / (1024 ** 3)
 
 
 def get_local_gb_used():
@@ -301,7 +301,7 @@ def get_local_gb_used():
         OVZ_VE_PRIVATE_DIR is.
     """
 
-    return get_local_gb(FLAGS.ovz_ve_private_dir)['used'] / (1024 ** 3)
+    return get_local_gb(CONF.ovz_ve_private_dir)['used'] / (1024 ** 3)
 
 
 def get_hypervisor_type():
@@ -516,7 +516,7 @@ def generate_network_dict(instance_id, network_info):
             address_v6 = None
             gateway_v6 = None
             netmask_v6 = None
-            if FLAGS.use_ipv6:
+            if CONF.use_ipv6:
                 address_v6 = mapping['ip6s'][0]['ip']
                 netmask_v6 = mapping['ip6s'][0]['netmask']
                 gateway_v6 = mapping['gateway6']

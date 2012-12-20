@@ -21,11 +21,11 @@ from nova.utils import synchronized
 from nova.virt.openvz import utils as ovz_utils
 from nova import db
 from nova import context
-from nova import flags
+from nova.openstack.common import cfg
 from nova.openstack.common import log as logging
 from Cheetah.Template import Template
 
-FLAGS = flags.FLAGS
+CONF = cfg.CONF
 LOG = logging.getLogger('nova.virt.openvz.network_drivers.tc')
 
 
@@ -50,14 +50,14 @@ class OVZTcRules():
         if not len(OVZTcRules.available_ids):
             LOG.debug(_('Available_ids is empty, filling it with numbers'))
             OVZTcRules.available_ids = [
-                i for i in range(1, FLAGS.ovz_tc_id_max)
+                i for i in range(1, CONF.ovz_tc_id_max)
             ]
 
         # do an initial clean of the available ids
         self._remove_used_ids()
         LOG.debug(
             _('OVZTcRules thinks ovz_tc_host_slave_device is set to %s')
-            % FLAGS.ovz_tc_host_slave_device)
+            % CONF.ovz_tc_host_slave_device)
 
     def instance_info(self, instance_id, address, vz_iface):
         """
@@ -84,8 +84,8 @@ class OVZTcRules():
 
         # Calculate the bandwidth total by figuring out how many units we have
         self.bandwidth = int(round(self.instance_type['memory_mb'] /
-                                   FLAGS.ovz_memory_unit_size)) *\
-                         FLAGS.ovz_tc_mbit_per_unit
+                                   CONF.ovz_memory_unit_size)) *\
+                         CONF.ovz_tc_mbit_per_unit
         LOG.debug(_('Allotted bandwidth: %s') % self.bandwidth)
         self.tc_id = self._get_instance_tc_id()
         if not self.tc_id:
@@ -119,11 +119,11 @@ class OVZTcRules():
         template = self._load_template('tc_container_start.template')
         search_list = {
             'prio': self.tc_id,
-            'host_iface': FLAGS.ovz_tc_host_slave_device,
+            'host_iface': CONF.ovz_tc_host_slave_device,
             'vz_iface': self.vz_iface,
             'bandwidth': self.bandwidth,
             'vz_address': self.address,
-            'line_speed': FLAGS.ovz_tc_max_line_speed
+            'line_speed': CONF.ovz_tc_max_line_speed
         }
         ovz_utils.save_instance_metadata(self.instance['id'],
                                          'tc_id', self.tc_id)
@@ -133,7 +133,7 @@ class OVZTcRules():
         template = self._load_template('tc_container_stop.template')
         search_list = {
             'prio': self.tc_id,
-            'host_iface': FLAGS.ovz_tc_host_slave_device,
+            'host_iface': CONF.ovz_tc_host_slave_device,
             'vz_iface': self.vz_iface,
             'bandwidth': self.bandwidth,
             'vz_address': self.address
@@ -145,15 +145,15 @@ class OVZTcRules():
     def host_start(self):
         template = self._load_template('tc_host_start.template')
         search_list = {
-            'host_iface': FLAGS.ovz_tc_host_slave_device,
-            'line_speed': FLAGS.ovz_tc_max_line_speed
+            'host_iface': CONF.ovz_tc_host_slave_device,
+            'line_speed': CONF.ovz_tc_max_line_speed
         }
         return self._fill_template(template, search_list).splitlines()
 
     def host_stop(self):
         template = self._load_template('tc_host_stop.template')
         search_list = {
-            'host_iface': FLAGS.ovz_tc_host_slave_device
+            'host_iface': CONF.ovz_tc_host_slave_device
         }
         return self._fill_template(template, search_list).splitlines()
 
@@ -162,7 +162,7 @@ class OVZTcRules():
         read and return the template file
         """
         full_template_path = '%s/%s' % (
-            FLAGS.ovz_tc_template_dir, template_name)
+            CONF.ovz_tc_template_dir, template_name)
         full_template_path = os.path.abspath(full_template_path)
         try:
             LOG.debug(_('Opening template file: %s') % full_template_path)
@@ -189,7 +189,7 @@ class OVZTcRules():
     def _list_existing_ids(self):
         LOG.debug(_('Attempting to list existing IDs'))
         out = ovz_utils.execute('tc', 'filter', 'show', 'dev',
-                                FLAGS.ovz_tc_host_slave_device,
+                                CONF.ovz_tc_host_slave_device,
                                 run_as_root=True)
         ids = list()
         for line in out.splitlines():

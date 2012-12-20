@@ -20,11 +20,11 @@ OpenVz doesn't have provision for a script to be run before a container
 is stopped but with the host node's context so we are implementing one here.
 """
 import os
+from nova.openstack.common import cfg
 from nova.openstack.common import log as logging
-from nova import flags
 from nova.virt.openvz.file import OVZFile
 
-FLAGS = flags.FLAGS
+CONF = cfg.CONF
 LOG = logging.getLogger('nova.virt.openvz.file_ext.shutdown')
 
 
@@ -38,7 +38,7 @@ class OVZShutdownFile(OVZFile):
         :param instance_id: Instance used for the file
         """
         LOG.debug(_('Beginning OVZShutdownFile'))
-        filename = "%s/%s.shutdown" % (FLAGS.ovz_config_dir, instance_id)
+        filename = "%s/%s.shutdown" % (CONF.ovz_config_dir, instance_id)
         filename = os.path.abspath(filename)
         LOG.debug(_('OVZShutdownFile: %s') % filename)
         super(OVZShutdownFile, self).__init__(filename, permissions)

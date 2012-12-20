@@ -24,9 +24,9 @@ import json
 from nova import context
 from nova import db
 from nova.openstack.common import log as logging
-from nova import flags
+from nova.openstack.common import cfg
 
-FLAGS = flags.FLAGS
+CONF = cfg.CONF
 LOG = logging.getLogger('nova.virt.openvz.volume_ops')
 
 

@@ -23,6 +23,7 @@ is sketchy at best.
 import os
 import pexpect
 import uuid as uuid4
+from nova.openstack.common import cfg
 from nova.openstack.common import log as logging
 from nova import db
 from nova import context
@@ -30,9 +31,8 @@ from nova import exception
 from nova.virt.openvz import utils as ovz_utils
 from nova.virt.openvz.file_ext.mount import OVZMountFile
 from nova.virt.openvz.file_ext.umount import OVZUmountFile
-from nova import flags
 
-FLAGS = flags.FLAGS
+CONF = cfg.CONF
 LOG = logging.getLogger('nova.virt.openvz.volume')
 
 
@@ -52,9 +52,9 @@ class OVZVolume(object):
             self.fs_uuid = fs_uuid
 
         self.context = context
-        self.mountfile = '%s/%s.mount' % (FLAGS.ovz_config_dir,
+        self.mountfile = '%s/%s.mount' % (CONF.ovz_config_dir,
                                           self.instance_id)
-        self.umountfile = '%s/%s.umount' % (FLAGS.ovz_config_dir,
+        self.umountfile = '%s/%s.umount' % (CONF.ovz_config_dir,
                                             self.instance_id)
         self.mountfile = os.path.abspath(self.mountfile)
         self.umountfile = os.path.abspath(self.umountfile)
@@ -63,7 +63,7 @@ class OVZVolume(object):
         """
         Generate a uuid for the filesystem and create it
         """
-        ovz_utils.mkfs(self.device, FLAGS.ovz_volume_default_fs, self.fs_uuid)
+        ovz_utils.mkfs(self.device, CONF.ovz_volume_default_fs, self.fs_uuid)
 
     def setup(self):
         """
@@ -154,7 +154,7 @@ class OVZVolume(object):
         """
         try:
             ovz_utils.execute('blockdev', '--getsize64', device_path,
-                              attempts=FLAGS.ovz_system_num_tries,
+                              attempts=CONF.ovz_system_num_tries,
                               run_as_root=True)
         except exception.ProcessExecutionError:
             raise exception.InvalidDevicePath(path=device_path)
@@ -167,7 +167,7 @@ class OVZVolume(object):
             if i == 0:
                 return
             raise IOError('Device path at %s did not seem to be %s.' %
-                          (device_path, FLAGS.volume_fstype))
+                          (device_path, CONF.volume_fstype))
         except pexpect.EOF:
             raise IOError("Volume was not formatted.")
         child.expect(pexpect.EOF)
@@ -175,5 +175,5 @@ class OVZVolume(object):
     def format(self, device_path):
         """Formats the device at device_path and checks the filesystem."""
         self._check_device_exists(device_path)
-        ovz_utils.mkfs(device_path, FLAGS.ovz_volume_default_fs)
+        ovz_utils.mkfs(device_path, CONF.ovz_volume_default_fs)
         self._check_format(device_path)

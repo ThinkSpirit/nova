@@ -20,13 +20,12 @@ A driver specific to OpenVz as the support for Ovz in libvirt
 is sketchy at best.
 """
 
+from nova.openstack.common import cfg
 from nova.openstack.common import log as logging
 from nova.virt.openvz.file_ext.mounts import OVZMounts
 from nova.virt.openvz import utils as ovz_utils
-from nova import flags
 
-FLAGS = flags.FLAGS
-
+CONF = cfg.CONF
 LOG = logging.getLogger('nova.virt.openvz.file_ext.umount')
 
 

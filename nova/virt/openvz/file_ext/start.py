@@ -22,13 +22,13 @@ is sketchy at best.
 
 import os
 from nova.virt.openvz.file import OVZFile
-from nova import flags
+from nova.openstack.common import cfg
 
-FLAGS = flags.FLAGS
+CONF = cfg.CONF
 
 
 class OVZContainerStartScript(OVZFile):
     def __init__(self, instance_id):
-        filename = "%s/%s.start" % (FLAGS.ovz_config_dir, instance_id)
+        filename = "%s/%s.start" % (CONF.ovz_config_dir, instance_id)
         filename = os.path.abspath(filename)
         super(OVZContainerStartScript, self).__init__(filename)

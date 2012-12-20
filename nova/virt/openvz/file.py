@@ -22,11 +22,11 @@ is sketchy at best.
 
 import os
 from nova import exception
-from nova import flags
+from nova.openstack.common import cfg
 from nova.openstack.common import log as logging
 from nova.virt.openvz import utils as ovz_utils
 
-FLAGS = flags.FLAGS
+CONF = cfg.CONF
 
 LOG = logging.getLogger('nova.virt.openvz.file')
 

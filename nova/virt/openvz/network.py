@@ -23,15 +23,15 @@ is sketchy at best.
 import os
 from nova import exception
 from Cheetah.Template import Template
+from nova.openstack.common import cfg
 from nova.openstack.common import log as logging
 from nova.virt.openvz import utils as ovz_utils
 from nova.virt.openvz.file import OVZFile
 from nova.virt.openvz.file_ext.boot import OVZBootFile
 from nova.virt.openvz.file_ext.shutdown import OVZShutdownFile
 from nova.virt.openvz.network_drivers.tc import OVZTcRules
-from nova import flags
 
-FLAGS = flags.FLAGS
+CONF = cfg.CONF
 LOG = logging.getLogger('nova.virt.openvz.network')
 
 
@@ -57,7 +57,7 @@ class OVZNetworkInterfaces(object):
         """
         Add all interfaces and addresses to the container.
         """
-        if FLAGS.ovz_use_veth_devs:
+        if CONF.ovz_use_veth_devs:
             for net_dev in self.interface_info:
                 self._add_netif(net_dev['id'], net_dev['name'],
                                 net_dev['bridge'], net_dev['mac'])
@@ -89,9 +89,9 @@ class OVZNetworkInterfaces(object):
         """
         Load templates needed for network interfaces.
         """
-        if FLAGS.ovz_use_veth_devs:
+        if CONF.ovz_use_veth_devs:
             # TODO(imsplitbit): make a cheatah template for dhcp networking
-            self.template = open(FLAGS.injected_network_template).read()
+            self.template = open(CONF.injected_network_template).read()
         else:
             self.template = None
 
@@ -106,7 +106,7 @@ class OVZNetworkInterfaces(object):
             self.iface_file = str(
                 Template(self.template,
                          searchList=[{'interfaces': self.interface_info,
-                                      'use_ipv6': FLAGS.use_ipv6}]))
+                                      'use_ipv6': CONF.use_ipv6}]))
             with network_file:
                 network_file.append(self.iface_file.split('\n'))
                 network_file.write()
@@ -128,7 +128,7 @@ class OVZNetworkInterfaces(object):
         redhat_path = '/etc/sysconfig/network-scripts/'
         debian_path = '/etc/network/interfaces'
         prefix = '%(private_dir)s/%(instance_id)s' %\
-                 {'private_dir': FLAGS.ovz_ve_private_dir,
+                 {'private_dir': CONF.ovz_ve_private_dir,
                   'instance_id': self.interface_info[0]['id']}
         prefix = os.path.abspath(prefix)
 

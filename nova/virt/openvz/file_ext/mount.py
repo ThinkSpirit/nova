@@ -23,9 +23,9 @@ is sketchy at best.
 from nova.openstack.common import log as logging
 from nova.virt.openvz.file_ext.mounts import OVZMounts
 from nova.virt.openvz import utils as ovz_utils
-from nova import flags
+from nova.openstack.common import cfg
 
-FLAGS = flags.FLAGS
+CONF = cfg.CONF
 
 LOG = logging.getLogger('nova.virt.openvz.file_ext.mount')
 
@@ -46,7 +46,7 @@ class OVZMountFile(OVZMounts):
         """
         #TODO(imsplitbit): Add LABEL= to allow for disk labels as well
         mount_line = 'mount -o %s UUID=%s %s' % (
-            FLAGS.ovz_mount_options, self.uuid, self.host_mount)
+            CONF.ovz_mount_options, self.uuid, self.host_mount)
         return mount_line
 
     def container_mount_line(self):
@@ -55,7 +55,7 @@ class OVZMountFile(OVZMounts):
         within the container's root filesystem.  This is done with the bind
         mount feature and is the prescribed method for OpenVz
         """
-        if FLAGS.ovz_use_bind_mount:
+        if CONF.ovz_use_bind_mount:
             return 'mount --bind %s %s' %\
                    (self.host_mount, self.container_root_mount)
         else:

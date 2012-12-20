@@ -21,15 +21,14 @@ is sketchy at best.
 """
 from nova.virt.openvz.volume import OVZVolume
 from nova.virt.openvz import utils as ovz_utils
-from nova import flags
 from nova import exception
 from nova.openstack.common import cfg
 from nova.openstack.common import log as logging
 from nova.utils import synchronized
 
 
-FLAGS = flags.FLAGS
-FLAGS.register_opt(
+CONF = cfg.CONF
+CONF.register_opt(
     cfg.IntOpt('ovz_iscsiadm_num_tries',
                default=1,
                help='Number of attempts to make an iscsi connection'))
@@ -79,7 +78,7 @@ class OVZISCSIStorageDriver(OVZVolume):
                                 self.iscsi_properties['target_iqn'],
                                 '-p', self.iscsi_properties['target_portal'],
                                 *iscsi_command, run_as_root=True,
-                                attempts=FLAGS.ovz_iscsiadm_num_tries,
+                                attempts=CONF.ovz_iscsiadm_num_tries,
                                 raise_on_error=raise_on_error)
         LOG.debug("iscsiadm %s: stdout=%s" %
                   (iscsi_command, out))

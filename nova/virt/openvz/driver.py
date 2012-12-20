@@ -25,7 +25,6 @@ import socket
 import json
 import math
 from base64 import b64decode, b64encode
-from nova import flags
 from nova.openstack.common import cfg
 from nova import db
 from nova import exception
@@ -163,14 +162,11 @@ openvz_conn_opts = [
                       'committing cpu resources')
 ]
 
-FLAGS = flags.FLAGS
-FLAGS.register_opts(openvz_conn_opts)
+CONF = cfg.CONF
+CONF.register_opts(openvz_conn_opts)
+CONF.import_opt('host', 'nova.config')
 
 LOG = logging.getLogger('nova.virt.openvz.driver')
-
-
-def get_connection(read_only):
-    return OpenVzDriver(read_only)
 
 
 class OpenVzDriver(driver.ComputeDriver):
@@ -186,7 +182,7 @@ class OpenVzDriver(driver.ComputeDriver):
         self._initiator = None
         self.host = None
         self.read_only = read_only
-        self.vif_driver = importutils.import_object(FLAGS.ovz_vif_driver)
+        self.vif_driver = importutils.import_object(CONF.ovz_vif_driver)
         LOG.debug(_('__init__ complete in OpenVzDriver'))
 
     def legacy_nwinfo(self):
@@ -486,7 +482,7 @@ class OpenVzDriver(driver.ComputeDriver):
         """
 
         image_name = '%s.tar.gz' % instance['image_ref']
-        full_image_path = '%s/%s' % (FLAGS.ovz_image_template_dir, image_name)
+        full_image_path = '%s/%s' % (CONF.ovz_image_template_dir, image_name)
 
         if not os.path.exists(full_image_path):
             # Grab image and place it in the image cache
@@ -841,23 +837,23 @@ class OpenVzDriver(driver.ComputeDriver):
             instance_type['memory_mb'])
 
         instance_memory_mb = int(instance_type['memory_mb'])
-        memory_unit_size = int(FLAGS.ovz_memory_unit_size)
-        max_fd_per_unit = int(FLAGS.ovz_file_descriptors_per_unit)
+        memory_unit_size = int(CONF.ovz_memory_unit_size)
+        max_fd_per_unit = int(CONF.ovz_file_descriptors_per_unit)
         max_fd = int(instance_memory_mb / memory_unit_size) * max_fd_per_unit
         self._set_vmguarpages(instance, instance_memory_pages)
         self._set_privvmpages(instance, instance_memory_pages)
         self._set_kmemsize(instance, instance_memory_bytes)
         self._set_numfiles(instance, max_fd)
         self._set_numflock(instance, max_fd)
-        if FLAGS.ovz_use_cpuunit:
+        if CONF.ovz_use_cpuunit:
             self._set_cpuunits(instance, percent_of_resource)
-        if FLAGS.ovz_use_cpulimit:
+        if CONF.ovz_use_cpulimit:
             self._set_cpulimit(instance, percent_of_resource)
-        if FLAGS.ovz_use_cpus:
+        if CONF.ovz_use_cpus:
             self._set_cpus(instance, instance_type['vcpus'])
-        if FLAGS.ovz_use_ioprio:
+        if CONF.ovz_use_ioprio:
             self._set_ioprio(instance, int(instance_type['memory_mb']))
-        if FLAGS.ovz_use_disk_quotas:
+        if CONF.ovz_use_disk_quotas:
             self._set_diskspace(instance, instance_type)
 
         if network_info:
@@ -954,12 +950,12 @@ class OpenVzDriver(driver.ComputeDriver):
         setting are completely inadequate for any normal workload.
         """
 
-        # Now use the configuration flags to calculate the appropriate
+        # Now use the configuration CONF to calculate the appropriate
         # values for both barrier and limit.
         kmem_limit = int(instance_memory * (
-            float(FLAGS.ovz_kmemsize_percent_of_memory) / 100.0))
+            float(CONF.ovz_kmemsize_percent_of_memory) / 100.0))
         kmem_barrier = int(kmem_limit * (
-            float(FLAGS.ovz_kmemsize_barrier_differential) / 100.0))
+            float(CONF.ovz_kmemsize_barrier_differential) / 100.0))
         kmemsize = '%d:%d' % (kmem_barrier, kmem_limit)
 
         ovz_utils.execute('vzctl', 'set', instance['id'], '--save',
@@ -1008,7 +1004,7 @@ class OpenVzDriver(driver.ComputeDriver):
 
         cpulimit = int(round(
             (self.utility['CPULIMIT'] * percent_of_resource) *
-            FLAGS.ovz_cpulimit_overcommit_multiplier))
+            CONF.ovz_cpulimit_overcommit_multiplier))
 
         if cpulimit > self.utility['CPULIMIT']:
             cpulimit = self.utility['CPULIMIT']
@@ -1059,7 +1055,7 @@ class OpenVzDriver(driver.ComputeDriver):
         # how many ovz_memory_unit_size chunks are in the container's memory
         # allocation and then using python's math library to solve for that
         # number's logarithm.
-        num_chunks = int(memory_mb / FLAGS.ovz_memory_unit_size)
+        num_chunks = int(memory_mb / CONF.ovz_memory_unit_size)
 
         try:
             ioprio = int(round(math.log(num_chunks, 2)))
@@ -1092,12 +1088,12 @@ class OpenVzDriver(driver.ComputeDriver):
         soft = int(instance_type['root_gb'])
 
         hard = int(instance_type['root_gb'] *
-                   FLAGS.ovz_disk_space_oversub_percent)
+                   CONF.ovz_disk_space_oversub_percent)
 
         # Now set the increment of the limit.  I do this here so that I don't
         # have to do this in every line above.
-        soft = '%s%s' % (soft, FLAGS.ovz_disk_space_increment)
-        hard = '%s%s' % (hard, FLAGS.ovz_disk_space_increment)
+        soft = '%s%s' % (soft, CONF.ovz_disk_space_increment)
+        hard = '%s%s' % (hard, CONF.ovz_disk_space_increment)
 
         ovz_utils.execute('vzctl', 'set', instance['id'], '--save',
                           '--diskspace', '%s:%s' % (soft, hard),
@@ -1199,7 +1195,7 @@ class OpenVzDriver(driver.ComputeDriver):
         path = b64decode(b64_path)
         LOG.debug(_('Injecting file: %s') % path)
         file_path = '%s/%s/%s' % (
-            FLAGS.ovz_ve_private_dir, instance['id'], path)
+            CONF.ovz_ve_private_dir, instance['id'], path)
         LOG.debug(_('New file path: %s') % file_path)
         fh = OVZFile(file_path, 644)
         with fh:
@@ -1296,14 +1292,14 @@ class OpenVzDriver(driver.ComputeDriver):
         """
         # first assemble a list of files that need to be cleaned up, then
         # do the deed.
-        for file in os.listdir(FLAGS.ovz_config_dir):
+        for file in os.listdir(CONF.ovz_config_dir):
             if fnmatch.fnmatch(file, '%s.*' % instance_id):
                 # minor protection for /
-                if FLAGS.ovz_config_dir == '/':
+                if CONF.ovz_config_dir == '/':
                     raise exception.InvalidDevicePath(
                         _('I refuse to operate on /'))
 
-                file = '%s/%s' % (FLAGS.ovz_config_dir, file)
+                file = '%s/%s' % (CONF.ovz_config_dir, file)
                 LOG.debug(_('Deleting file: %s') % file)
                 ovz_utils.execute('rm', '-f', file, run_as_root=True,
                         raise_on_error=False)
@@ -1320,7 +1316,7 @@ class OpenVzDriver(driver.ComputeDriver):
         If this fails to execute, no exception is raised but a log error event
         is triggered
         """
-        mount_root = '%s/%s' % (FLAGS.ovz_ve_host_mount_dir, instance_id)
+        mount_root = '%s/%s' % (CONF.ovz_ve_host_mount_dir, instance_id)
         mount_root = os.path.abspath(mount_root)
 
         # Because we are using an rm -rf command lets do some simple validation
@@ -1340,8 +1336,8 @@ class OpenVzDriver(driver.ComputeDriver):
                 LOG.debug(_('Instance id is not an integer: %s') % instance_id)
                 validation_failed = True
 
-        if not FLAGS.ovz_ve_host_mount_dir:
-            LOG.debug(_('FLAGS.ovz_ve_host_mount_dir not set'))
+        if not CONF.ovz_ve_host_mount_dir:
+            LOG.debug(_('CONF.ovz_ve_host_mount_dir not set'))
             validation_failed = True
 
         if validation_failed:
@@ -1633,9 +1629,9 @@ class OpenVzDriver(driver.ComputeDriver):
                 LOG.warn(_('Could not determine iscsi initiator name'),
                          instance=instance)
         return {
-            'ip': FLAGS.my_ip,
+            'ip': CONF.my_ip,
             'initiator': self._initiator,
-            'host': FLAGS.host
+            'host': CONF.host
         }
 
     # TODO(imsplitbit): finish the outstanding software contract with nova

@@ -21,12 +21,12 @@ is sketchy at best.
 """
 
 import os
+from nova.openstack.common import cfg
 from nova.openstack.common import log as logging
 from nova.virt.openvz.file import OVZFile
 from nova.virt.openvz import utils as ovz_utils
-from nova import flags
 
-FLAGS = flags.FLAGS
+CONF = cfg.CONF
 
 LOG = logging.getLogger('nova.virt.openvz.file_ext.mounts')
 
@@ -43,14 +43,14 @@ class OVZMounts(OVZFile):
 
         # Generate the mountpoint paths
         self.host_mount_container_root = '%s/%s' %\
-                                         (FLAGS.ovz_ve_host_mount_dir,
+                                         (CONF.ovz_ve_host_mount_dir,
                                           instance_id)
         self.host_mount_container_root = os.path.abspath(
             self.host_mount_container_root)
         self.container_mount = '%s/%s/%s' %\
-                               (FLAGS.ovz_ve_private_dir, instance_id, mount)
+                               (CONF.ovz_ve_private_dir, instance_id, mount)
         self.container_root_mount = '%s/%s/%s' %\
-                                    (FLAGS.ovz_ve_root_dir, instance_id, mount)
+                                    (CONF.ovz_ve_root_dir, instance_id, mount)
         self.host_mount = '%s/%s' %\
                           (self.host_mount_container_root, mount)
         # Fix mounts to remove duplicate slashes

@@ -21,11 +21,11 @@ using the host node's context so we are implementing one here
 """
 
 import os
-from nova import flags
+from nova.openstack.common import cfg
 from nova.openstack.common import log as logging
 from nova.virt.openvz.file import OVZFile
 
-FLAGS = flags.FLAGS
+CONF = cfg.CONF
 LOG = logging.getLogger('nova.virt.openvz.file_ext.boot')
 
 
@@ -38,6 +38,6 @@ class OVZBootFile(OVZFile):
 
         :param instance_id: Instance used for the file
         """
-        filename = "%s/%s.boot" % (FLAGS.ovz_config_dir, instance_id)
+        filename = "%s/%s.boot" % (CONF.ovz_config_dir, instance_id)
         filename = os.path.abspath(filename)
         super(OVZBootFile, self).__init__(filename, permissions)
