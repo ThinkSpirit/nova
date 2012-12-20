@@ -170,10 +170,10 @@ LOG = logging.getLogger('nova.virt.openvz.driver')
 
 
 def get_connection(read_only):
-    return OpenVzConnection(read_only)
+    return OpenVzDriver(read_only)
 
 
-class OpenVzConnection(driver.ComputeDriver):
+class OpenVzDriver(driver.ComputeDriver):
     # OpenVz sets the upper limit of cpuunits to 500000
     MAX_CPUUNITS = 500000
 
