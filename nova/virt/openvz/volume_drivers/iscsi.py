@@ -111,7 +111,7 @@ class OVZISCSIStorageDriver(OVZVolume):
             self._iscsiadm_update("node.session.auth.password",
                                   self.iscsi_properties['auth_password'])
 
-    @lockutils.synchronized('iscsiadm_lock')
+    @lockutils.synchronized('iscsiadm_lock', 'openvz-')
     def discover_volume(self):
         """Discover volume on a remote host."""
         self.get_iscsi_properties_for_volume()
@@ -132,7 +132,7 @@ class OVZISCSIStorageDriver(OVZVolume):
             raise exception.VolumeNotFound(_("iSCSI device %s not found") %
                                            self.iscsi_properties['target_iqn'])
 
-    @lockutils.synchronized('iscsiadm_lock')
+    @lockutils.synchronized('iscsiadm_lock', 'openvz-')
     def disconnect_iscsi_volume(self):
         """Detach the volume from instance_name"""
         self.init_volume()
@@ -140,7 +140,7 @@ class OVZISCSIStorageDriver(OVZVolume):
         self._run_iscsiadm(("--logout",), raise_on_error=False)
         self._run_iscsiadm(('--op', 'delete'), raise_on_error=False)
 
-    @lockutils.synchronized('iscsiadm_lock')
+    @lockutils.synchronized('iscsiadm_lock', 'openvz-')
     def rescan(self):
         """Rescan the client storage connection"""
 

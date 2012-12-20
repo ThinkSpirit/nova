@@ -96,7 +96,7 @@ class OVZTcRules():
         self._save_instance_tc_id()
         LOG.debug(_('Saved the tc_id in the database for the instance'))
 
-    @lockutils.synchronized('get_id_lock')
+    @lockutils.synchronized('get_id_lock', 'openvz-')
     def get_id(self):
         """
         Uses nova utils decorator @lockutils.synchronized to make sure that we
