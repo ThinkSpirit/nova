@@ -187,7 +187,7 @@ class OpenVzDriver(driver.ComputeDriver):
         self.host = None
         self.read_only = read_only
         self.vif_driver = importutils.import_object(FLAGS.ovz_vif_driver)
-        LOG.debug(_('__init__ complete in OpenVzConnection'))
+        LOG.debug(_('__init__ complete in OpenVzDriver'))
 
     def legacy_nwinfo(self):
         """
@@ -285,7 +285,7 @@ class OpenVzDriver(driver.ComputeDriver):
         LOG.debug(_('Done setting up TC files, running TC startup'))
         bf.run_contents()
 
-        LOG.debug(_('init_host complete in OpenVzConnection'))
+        LOG.debug(_('init_host complete in OpenVzDriver'))
 
     def list_instances(self):
         """
