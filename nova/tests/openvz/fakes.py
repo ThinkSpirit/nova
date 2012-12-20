@@ -15,6 +15,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import os
 from nova.compute import power_state
 from nova.openstack.common import cfg
 from nova.virt import openvz
@@ -24,12 +25,61 @@ CONF = cfg.CONF
 class Context(object):
     def __init__(self):
         self.is_admin = False
-        self.read_deleted = 1
+        self.read_deleted = "yes"
 
 class AdminContext(Context):
     def __init__(self):
         super(AdminContext, self).__init__()
         self.is_admin = True
+
+class FakeOvzFile(object):
+    def __init__(self, filename, perms):
+        self.filename = filename
+        self.perms = perms
+
+    def __enter__(self):
+        """
+        This may feel dirty but we need to be able to read and write files
+        as a non priviledged user so we need to change the permissions to
+        be more open for our file operations and then secure them once we
+        are done.
+        """
+        if not self.exists():
+            self.make_path()
+            self.touch()
+
+        self.set_permissions(666)
+
+    def __exit__(self, _type, value, tb):
+        if self.exists():
+            self.set_permissions(self.permissions)
+
+    def exists(self):
+        return
+
+    def make_path(self, path):
+        return
+
+    def touch(self):
+        return
+
+    def set_permissions(self, perms):
+        return
+
+
+class FakeOVZShutdownFile(FakeOvzFile):
+    def __init__(self, instance_id, permissions):
+        filename = "%s/%s.shutdown" % (CONF.ovz_config_dir, instance_id)
+        filename = os.path.abspath(filename)
+        super(FakeOVZShutdownFile, self).__init__(filename, permissions)
+
+
+class FakeOVZBootFile(FakeOvzFile):
+    def __init__(self, instance_id, permissions):
+        filename = "%s/%s.shutdown" % (CONF.ovz_config_dir, instance_id)
+        filename = os.path.abspath(filename)
+        super(FakeOVZBootFile, self).__init__(filename, permissions)
+
 
 ROOTPASS = '2s3cUr3'
 
@@ -90,6 +140,12 @@ VZLISTDETAIL = "        %d         running   %s"\
 FINDBYNAME = VZLISTDETAIL.split()
 FINDBYNAME = {'name': FINDBYNAME[2], 'id': int(FINDBYNAME[0]),
               'state': FINDBYNAME[1]}
+FINDBYNAMENOSTATE = VZLISTDETAIL.split()
+FINDBYNAMENOSTATE = {'name': FINDBYNAMENOSTATE[2], 'id': int(FINDBYNAMENOSTATE[0]),
+                     'state': '-'}
+FINDBYNAMESHUTDOWN = VZLISTDETAIL.split()
+FINDBYNAMESHUTDOWN = {'name': FINDBYNAMESHUTDOWN[2], 'id': int(FINDBYNAMESHUTDOWN[0]),
+                      'state': 'stopped'}
 
 VZNAME = """\tinstance-00001001\n"""
 
