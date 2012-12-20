@@ -1,0 +1,339 @@
+# vim: tabstop=4 shiftwidth=4 softtabstop=4
+
+# Copyright 2010 OpenStack LLC.
+# All Rights Reserved.
+#
+#    Licensed under the Apache License, Version 2.0 (the "License"); you may
+#    not use this file except in compliance with the License. You may obtain
+#    a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+#    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+#    License for the specific language governing permissions and limitations
+#    under the License.
+
+from nova.compute import power_state
+from nova.openstack.common import cfg
+from nova.virt import openvz
+
+CONF = cfg.CONF
+
+class Context(object):
+    def __init__(self):
+        self.is_admin = False
+        self.read_deleted = 1
+
+class AdminContext(Context):
+    def __init__(self):
+        super(AdminContext, self).__init__()
+        self.is_admin = True
+
+ROOTPASS = '2s3cUr3'
+
+USER = {'user': 'admin', 'role': 'admin', 'id': 1}
+
+PROJECT = {'name': 'test', 'id': 2}
+
+ADMINCONTEXT = AdminContext()
+
+CONTEXT = Context()
+
+BDM = {
+    'block_device_mapping': [
+        {
+            'connection_info': {},
+            'mount_device': '/dev/sdgg'
+        }
+    ]
+}
+
+INSTANCE = {
+    "image_ref": 1,
+    "name": "instance-00001002",
+    "instance_type_id": 1,
+    "id": 1002,
+    "uuid": "07fd1fc9-eb75-4375-88d5-6247ce2fb7e4",
+    "hostname": "test.foo.com",
+    "power_state": power_state.RUNNING,
+    "admin_pass": ROOTPASS,
+    "user_id": USER['id'],
+    "project_id": PROJECT['id'],
+    "memory_mb": 1024,
+    "block_device_mapping": BDM
+}
+
+IMAGEPATH = '%s/%s.tar.gz' %\
+            (CONF.ovz_image_template_dir, INSTANCE['image_ref'])
+
+INSTANCETYPE = {
+    'vcpus': 1,
+    'name': 'm1.small',
+    'memory_mb': 2048,
+    'swap': 0,
+    'root_gb': 20
+}
+
+INSTANCES = [INSTANCE, INSTANCE]
+
+RES_PERCENT = .50
+
+RES_OVER_PERCENT = 1.50
+
+VZLIST = "\t1001\n\t%d\n\t1003\n\t1004\n" % (INSTANCE['id'],)
+
+VZLISTDETAIL = "        %d         running   %s"\
+               % (INSTANCE['id'], INSTANCE['hostname'])
+
+FINDBYNAME = VZLISTDETAIL.split()
+FINDBYNAME = {'name': FINDBYNAME[2], 'id': int(FINDBYNAME[0]),
+              'state': FINDBYNAME[1]}
+
+VZNAME = """\tinstance-00001001\n"""
+
+VZNAMES = """\tinstance-00001001\n\t%s
+              \tinstance-00001003\n\tinstance-00001004\n""" % (
+    INSTANCE['name'],)
+
+GOODSTATUS = {
+    'state': power_state.RUNNING,
+    'max_mem': 0,
+    'mem': 0,
+    'num_cpu': 0,
+    'cpu_time': 0
+}
+
+NOSTATUS = {
+    'state': power_state.NOSTATE,
+    'max_mem': 0,
+    'mem': 0,
+    'num_cpu': 0,
+    'cpu_time': 0
+}
+
+ERRORMSG = "vz command ran but output something to stderr"
+
+MEMINFO = """MemTotal:         506128 kB
+MemFree:          291992 kB
+Buffers:           44512 kB
+Cached:            64708 kB
+SwapCached:            0 kB
+Active:           106496 kB
+Inactive:          62948 kB
+Active(anon):      62108 kB
+Inactive(anon):      496 kB
+Active(file):      44388 kB
+Inactive(file):    62452 kB
+Unevictable:        2648 kB
+Mlocked:            2648 kB
+SwapTotal:       1477624 kB
+SwapFree:        1477624 kB
+Dirty:                 0 kB
+Writeback:             0 kB
+AnonPages:         62908 kB
+Mapped:            14832 kB
+Shmem:               552 kB
+Slab:              27988 kB
+SReclaimable:      17280 kB
+SUnreclaim:        10708 kB
+KernelStack:        1448 kB
+PageTables:         3092 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:     1730688 kB
+Committed_AS:     654760 kB
+VmallocTotal:   34359738367 kB
+VmallocUsed:       24124 kB
+VmallocChunk:   34359711220 kB
+HardwareCorrupted:     0 kB
+HugePages_Total:       0
+HugePages_Free:        0
+HugePages_Rsvd:        0
+HugePages_Surp:        0
+Hugepagesize:       2048 kB
+DirectMap4k:        8128 kB
+DirectMap2M:      516096 kB
+"""
+
+PROCINFO = """
+processor	: 0
+vendor_id	: AuthenticAMD
+cpu family	: 16
+model		: 4
+model name	: Dual-Core AMD Opteron(tm) Processor 2374 HE
+
+processor	: 1
+vendor_id	: AuthenticAMD
+cpu family	: 16
+model		: 4
+model name	: Dual-Core AMD Opteron(tm) Processor 2374 HE
+"""
+
+UTILITY = {
+    'CTIDS': {
+        1: {
+
+        }
+    },
+    'UTILITY': 10000,
+    'TOTAL': 1000,
+    'UNITS': 100000,
+    'MEMORY_MB': 512000,
+    'CPULIMIT': 2400
+}
+
+CPUUNITSCAPA = {
+    'total': 500000,
+    'subscribed': 1000
+}
+
+CPUCHECKCONT = """VEID      CPUUNITS
+-------------------------
+0       1000
+26      25000
+27      25000
+Current CPU utilization: 51000
+Power of the node: 758432
+"""
+
+CPUCHECKNOCONT = """Current CPU utilization: 51000
+Power of the node: 758432
+"""
+
+FILECONTENTS = """mount UUID=FEE52433-F693-448E-B6F6-AA6D0124118B /mnt/foo
+        mount --bind /mnt/foo /vz/private/1/mnt/foo
+        """
+
+NETWORKINFO = [
+    [
+        {
+            u'bridge': u'br100',
+            u'multi_host': False,
+            u'bridge_interface': u'eth0',
+            u'vlan': None,
+            u'id': 1,
+            u'injected': True,
+            u'cidr': u'10.0.2.0/24',
+            u'cidr_v6': None
+        },
+        {
+            u'should_create_bridge': True,
+            u'dns': [
+                u'192.168.2.1'
+            ],
+            u'label': u'usernet',
+            u'broadcast': u'10.0.2.255',
+            u'ips': [
+                {
+                    u'ip': u'10.0.2.16',
+                    u'netmask': u'255.255.255.0',
+                    u'enabled':
+                        u'1'
+                }
+            ],
+            u'mac': u'02:16:3e:0c:2c:08',
+            u'rxtx_cap': 0,
+            u'should_create_vlan': True,
+            u'dhcp_server': u'10.0.2.2',
+            u'gateway': u'10.0.2.2'
+        }
+    ],
+    [
+        {
+            u'bridge': u'br200',
+            u'multi_host': False,
+            u'bridge_interface': u'eth1',
+            u'vlan': None,
+            u'id': 2,
+            u'injected': True,
+            u'cidr': u'10.0.4.0/24',
+            u'cidr_v6': None
+        },
+        {
+            u'should_create_bridge': False,
+            u'dns': [
+                u'192.168.2.1'
+            ],
+            u'label': u'infranet',
+            u'broadcast': u'10.0.4.255',
+            u'ips': [
+                {
+                    u'ip': u'10.0.4.16',
+                    u'netmask':
+                        u'255.255.255.0',
+                    u'enabled': u'1'
+                }
+            ],
+            u'mac': u'02:16:3e:40:5e:1b',
+            u'rxtx_cap': 0,
+            u'should_create_vlan': False,
+            u'dhcp_server': u'10.0.2.2',
+            u'gateway': u'10.0.2.2'
+        }
+    ]
+]
+
+INTERFACEINFO = [
+    {
+        'id': 1,
+        'interface_number': 0,
+        'bridge': 'br100',
+        'name': 'eth0',
+        'mac': '02:16:3e:0c:2c:08',
+        'address': '10.0.2.16',
+        'netmask': '255.255.255.0',
+        'gateway': '10.0.2.2',
+        'broadcast': '10.0.2.255',
+        'dns': '192.168.2.1',
+        'address_v6': None,
+        'gateway_v6': None,
+        'netmask_v6': None
+    },
+    {
+        'id': 1,
+        'interface_number': 1,
+        'bridge': 'br200',
+        'name': 'eth1',
+        'mac': '02:16:3e:40:5e:1b',
+        'address': '10.0.4.16',
+        'netmask': '255.255.255.0',
+        'gateway': '10.0.2.2',
+        'broadcast': '10.0.4.255',
+        'dns': '192.168.2.1',
+        'address_v6': None,
+        'gateway_v6': None,
+        'netmask_v6': None
+    }
+]
+
+TEMPFILE = '/tmp/foo/file'
+
+NETTEMPLATE = """
+    # This file describes the network interfaces available on your system
+    # and how to activate them. For more information, see interfaces(5).
+
+    # The loopback network interface
+    auto lo
+    iface lo inet loopback
+
+    #for $ifc in $interfaces
+    auto ${ifc.name}
+    iface ${ifc.name} inet static
+            address ${ifc.address}
+            netmask ${ifc.netmask}
+            broadcast ${ifc.broadcast}
+            gateway ${ifc.gateway}
+            dns-nameservers ${ifc.dns}
+
+    #if $use_ipv6
+    iface ${ifc.name} inet6 static
+        address ${ifc.address_v6}
+        netmask ${ifc.netmask_v6}
+        gateway ${ifc.gateway_v6}
+    #end if
+
+    #end for
+    """
