@@ -17,7 +17,7 @@
 import random
 import os
 from nova import exception
-from nova.utils import synchronized
+from nova.openstack.common import lockutils
 from nova.virt.openvz import utils as ovz_utils
 from nova import db
 from nova import context
@@ -96,12 +96,12 @@ class OVZTcRules():
         self._save_instance_tc_id()
         LOG.debug(_('Saved the tc_id in the database for the instance'))
 
-    @synchronized('get_id_lock')
+    @lockutils.synchronized('get_id_lock')
     def get_id(self):
         """
-        Uses nova utils decorator @synchronized to make sure that we do not
-        return duplicate available ids.  This will return a random id number
-        between 1 and 9999 which are the limits of TC.
+        Uses nova utils decorator @lockutils.synchronized to make sure that we
+        do not return duplicate available ids.  This will return a random id
+        number between 1 and 9999 which are the limits of TC.
         """
         self._remove_used_ids()
         LOG.debug(_('Pulling new TC id'))
