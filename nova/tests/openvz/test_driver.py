@@ -24,6 +24,7 @@ from nova.compute import power_state
 from nova.tests.openvz import fakes
 from nova.virt.openvz import driver as openvz_conn
 from nova.virt.openvz import network as openvz_net
+from nova.virt.openvz import volume_ops as openvz_volume_ops
 from nova.openstack.common import cfg
 from nova.virt.openvz.file_ext.shutdown import OVZShutdownFile
 from nova.virt.openvz.file_ext.boot import OVZBootFile
@@ -560,7 +561,7 @@ class OpenVzDriverTestCase(test.TestCase):
 
     def test_init_host_success(self):
         self.mox.StubOutWithMock(openvz_conn, 'OVZTcRules')
-        openvz_conn.OVZTcRules(mox.IgnoreArg()).AndReturn(fakes.FakeOVZTcRules())
+        openvz_conn.OVZTcRules().AndReturn(fakes.FakeOVZTcRules)
         self.mox.StubOutWithMock(ovz_utils.utils, 'execute')
         ovz_utils.utils.execute('vzcpucheck', run_as_root=True).AndReturn(
             (fakes.CPUCHECKNOCONT, fakes.ERRORMSG))
@@ -912,8 +913,10 @@ class OpenVzDriverTestCase(test.TestCase):
         ovz_conn._clean_orphaned_directories(fakes.INSTANCE['id'])
         self.mox.StubOutWithMock(ovz_conn, '_clean_orphaned_files')
         ovz_conn._clean_orphaned_files(fakes.INSTANCE['id'])
+        self.mox.StubOutWithMock(openvz_volume_ops.OVZInstanceVolumeOps, 'detach_all_volumes')
+        openvz_volume_ops.OVZInstanceVolumeOps(fakes.INSTANCE).detach_all_volumes()
         self.mox.ReplayAll()
-        ovz_conn.destroy(fakes.INSTANCE, fakes.NETWORKINFO)
+        ovz_conn.destroy(fakes.INSTANCE, fakes.NETWORKINFO, fakes.BDM)
 
     def test_get_info_running_state(self):
         ovz_conn = openvz_conn.OpenVzDriver(False)
