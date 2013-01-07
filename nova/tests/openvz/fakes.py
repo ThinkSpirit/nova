@@ -18,24 +18,149 @@
 import os
 from nova.compute import power_state
 from nova.openstack.common import cfg
+from Cheetah.Template import Template
+from nova import exception
+import random
 from nova.virt import openvz
 
 CONF = cfg.CONF
+
+
+class FakeOVZTcRules(object):
+    try:
+        available_ids
+    except NameError:
+        available_ids = list()
+
+    try:
+        inflight_ids
+    except NameError:
+        inflight_ids = list()
+
+    def __init__(self):
+        if not len(FakeOVZTcRules.available_ids):
+            FakeOVZTcRules.available_ids = [
+            i for i in range(1, CONF.ovz_tc_id_max)
+            ]
+
+        self._remove_used_ids()
+
+    def instance_info(self, instance_id, address, vz_iface):
+        if not instance_id:
+            self.instance_type = dict()
+            self.instance_type['memory_mb'] = 2048
+
+        self.address = address
+        self.vz_iface = vz_iface
+        self.bandwidth = int(round(self.instance_type['memory_mb'] /
+                                   CONF.ovz_memory_unit_size)) *\
+                         CONF.ovz_tc_mbit_per_unit
+        self.tc_id = self._get_instance_tc_id()
+        if not self.tc_id:
+            self.tc_id = self.get_id()
+
+        self._save_instance_tc_id()
+
+    def get_id(self):
+        self._remove_used_ids()
+        id = self._pull_id()
+        while id in FakeOVZTcRules.inflight_ids:
+            id = self._pull_id()
+        self._reserve_id(id)
+        return id
+
+    def container_start(self):
+        template = self._load_template('tc_container_start.template')
+        search_list = {
+            'prio': self.tc_id,
+            'host_iface': CONF.ovz_tc_host_slave_device,
+            'vz_iface': self.vz_iface,
+            'bandwidth': self.bandwidth,
+            'vz_address': self.address,
+            'line_speed': CONF.ovz_tc_max_line_speed
+        }
+        return self._fill_template(template, search_list).splitlines()
+
+    def container_stop(self):
+        template = self._load_template('tc_container_stop.template')
+        search_list = {
+            'prio': self.tc_id,
+            'host_iface': CONF.ovz_tc_host_slave_device,
+            'vz_iface': self.vz_iface,
+            'bandwidth': self.bandwidth,
+            'vz_address': self.address
+        }
+        return self._fill_template(template, search_list).splitlines()
+
+    def host_start(self):
+        template = self._load_template('tc_host_start.template')
+        search_list = {
+            'host_iface': CONF.ovz_tc_host_slave_device,
+            'line_speed': CONF.ovz_tc_max_line_speed
+        }
+        return self._fill_template(template, search_list).splitlines()
+
+    def host_stop(self):
+        template = self._load_template('tc_host_stop.template')
+        search_list = {
+            'host_iface': CONF.ovz_tc_host_slave_device
+        }
+        return self._fill_template(template, search_list).splitlines()
+
+    def _load_template(self, template_name):
+        full_template_path = '%s/%s' % (
+            CONF.ovz_tc_template_dir, template_name)
+        full_template_path = os.path.abspath(full_template_path)
+        try:
+            template_file = open(full_template_path).read()
+            return template_file
+        except Exception as err:
+            raise exception.FileNotFound(err)
+
+    def _fill_template(self, template, search_list):
+        return str(Template(template, searchList=[search_list]))
+
+    def _pull_id(self):
+        return FakeOVZTcRules.available_ids[random.randint(
+            0, len(FakeOVZTcRules.available_ids) - 1)]
+
+    def _list_existing_ids(self):
+        return [1,3,6]
+
+    def _reserve_id(self, id):
+        FakeOVZTcRules.inflight_ids.append(id)
+        FakeOVZTcRules.available_ids.remove(id)
+
+    def _remove_used_ids(self):
+        used_ids = self._list_existing_ids()
+        for id in used_ids:
+            if id in FakeOVZTcRules.available_ids:
+                FakeOVZTcRules.available_ids.remove(id)
+
+    def _save_instance_tc_id(self):
+        return
+
+    def _get_instance_tc_id(self):
+        return 1
+
 
 class Context(object):
     def __init__(self):
         self.is_admin = False
         self.read_deleted = "yes"
 
+
 class AdminContext(Context):
     def __init__(self):
         super(AdminContext, self).__init__()
         self.is_admin = True
 
+
 class FakeOvzFile(object):
     def __init__(self, filename, perms):
         self.filename = filename
         self.perms = perms
+        self.contents = []
 
     def __enter__(self):
         """
@@ -57,7 +182,7 @@ class FakeOvzFile(object):
     def exists(self):
         return
 
-    def make_path(self, path):
+    def make_path(self, path=None):
         return
 
     def touch(self):
@@ -65,6 +190,15 @@ class FakeOvzFile(object):
 
     def set_permissions(self, perms):
         return
+
+    def read(self):
+        return
+
+    def run_contents(self):
+        return
+
+    def set_contents(self, contents):
+        self.contents = contents
 
 
 class FakeOVZShutdownFile(FakeOvzFile):

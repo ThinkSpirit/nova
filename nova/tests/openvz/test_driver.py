@@ -23,6 +23,7 @@ from nova import test
 from nova.compute import power_state
 from nova.tests.openvz import fakes
 from nova.virt.openvz import driver as openvz_conn
+from nova.virt.openvz import network as openvz_net
 from nova.openstack.common import cfg
 from nova.virt.openvz.file_ext.shutdown import OVZShutdownFile
 from nova.virt.openvz.file_ext.boot import OVZBootFile
@@ -54,12 +55,14 @@ class OpenVzDriverTestCase(test.TestCase):
     def test_start_success(self):
         # Testing happy path :-D
         # Mock the objects needed for this test to succeed.
+        self.mox.StubOutWithMock(openvz_conn, 'OVZBootFile')
+        openvz_conn.OVZBootFile(fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(fakes.FakeOVZBootFile(fakes.INSTANCE['id'], 700))
         self.mox.StubOutWithMock(openvz_conn.utils, 'execute')
         openvz_conn.utils.execute('vzctl', 'start', fakes.INSTANCE['id'],
             run_as_root=True).AndReturn(('', fakes.ERRORMSG))
         self.mox.StubOutWithMock(openvz_conn.db, 'instance_update')
         openvz_conn.db.instance_update(mox.IgnoreArg(),
-            fakes.INSTANCE['id'],
+            fakes.INSTANCE['uuid'],
             {'power_state': power_state.RUNNING})
         # Start the tests
         self.mox.ReplayAll()
@@ -161,18 +164,26 @@ class OpenVzDriverTestCase(test.TestCase):
             conn._configure_vz, fakes.INSTANCE)
 
     def test_stop_success(self):
+        self.mox.StubOutWithMock(openvz_conn, 'OVZShutdownFile')
+        openvz_conn.OVZShutdownFile(fakes.INSTANCE['id'],
+            mox.IgnoreArg()).AndReturn(
+            fakes.FakeOVZShutdownFile(fakes.INSTANCE['id'], 700))
         self.mox.StubOutWithMock(openvz_conn.utils, 'execute')
         openvz_conn.utils.execute('vzctl', 'stop', fakes.INSTANCE['id'],
             run_as_root=True).AndReturn(('', fakes.ERRORMSG))
         self.mox.StubOutWithMock(openvz_conn.db, 'instance_update')
         openvz_conn.db.instance_update(mox.IgnoreArg(),
-            fakes.INSTANCE['id'],
+            fakes.INSTANCE['uuid'],
             {'power_state': power_state.SHUTDOWN})
         self.mox.ReplayAll()
         conn = openvz_conn.OpenVzDriver(False)
         conn._stop(fakes.INSTANCE)
 
     def test_stop_failure_on_exec(self):
+        self.mox.StubOutWithMock(openvz_conn, 'OVZShutdownFile')
+        openvz_conn.OVZShutdownFile(fakes.INSTANCE['id'],
+            mox.IgnoreArg()).AndReturn(
+            fakes.FakeOVZShutdownFile(fakes.INSTANCE['id'], 700))
         self.mox.StubOutWithMock(openvz_conn.utils, 'execute')
         openvz_conn.utils.execute('vzctl', 'stop', fakes.INSTANCE['id'],
             run_as_root=True).AndRaise(
@@ -183,12 +194,16 @@ class OpenVzDriverTestCase(test.TestCase):
             conn._stop, fakes.INSTANCE)
 
     def test_stop_failure_on_db_access(self):
+        self.mox.StubOutWithMock(openvz_conn, 'OVZShutdownFile')
+        openvz_conn.OVZShutdownFile(fakes.INSTANCE['id'],
+            mox.IgnoreArg()).AndReturn(
+            fakes.FakeOVZShutdownFile(fakes.INSTANCE['id'], 700))
         self.mox.StubOutWithMock(openvz_conn.utils, 'execute')
         openvz_conn.utils.execute('vzctl', 'stop', fakes.INSTANCE['id'],
             run_as_root=True).AndReturn(('', fakes.ERRORMSG))
         self.mox.StubOutWithMock(openvz_conn.db, 'instance_update')
         openvz_conn.db.instance_update(mox.IgnoreArg(),
-            fakes.INSTANCE['id'],
+            fakes.INSTANCE['uuid'],
             {'power_state': power_state.SHUTDOWN})\
         .AndRaise(exception.DBError('FAIL'))
         self.mox.ReplayAll()
@@ -289,8 +304,6 @@ class OpenVzDriverTestCase(test.TestCase):
         conn = openvz_conn.OpenVzDriver(False)
         self.mox.StubOutWithMock(conn, '_percent_of_resource')
         conn._percent_of_resource(mox.IgnoreArg()).AndReturn(fakes.RES_PERCENT)
-        self.mox.StubOutWithMock(ovz_utils, 'get_cpuunits_capability')
-        ovz_utils.get_cpuunits_capability().AndReturn(fakes.CPUUNITSCAPA)
         self.mox.StubOutWithMock(openvz_conn, 'ovz_utils')
         openvz_conn.ovz_utils = ovz_utils
         self.mox.ReplayAll()
@@ -304,8 +317,6 @@ class OpenVzDriverTestCase(test.TestCase):
             '--cpuunits', mox.IgnoreArg(),
             run_as_root=True).AndReturn(('', fakes.ERRORMSG))
         conn = openvz_conn.OpenVzDriver(False)
-        self.mox.StubOutWithMock(ovz_utils, 'get_cpuunits_capability')
-        ovz_utils.get_cpuunits_capability().AndReturn(fakes.CPUUNITSCAPA)
         self.mox.StubOutWithMock(openvz_conn, 'ovz_utils')
         openvz_conn.ovz_utils = ovz_utils
         self.mox.StubOutWithMock(conn, '_percent_of_resource')
@@ -324,8 +335,6 @@ class OpenVzDriverTestCase(test.TestCase):
         conn = openvz_conn.OpenVzDriver(False)
         self.mox.StubOutWithMock(conn, '_percent_of_resource')
         conn._percent_of_resource(mox.IgnoreArg()).AndReturn(fakes.RES_PERCENT)
-        self.mox.StubOutWithMock(ovz_utils, 'get_cpuunits_capability')
-        ovz_utils.get_cpuunits_capability().AndReturn(fakes.CPUUNITSCAPA)
         self.mox.StubOutWithMock(openvz_conn, 'ovz_utils')
         openvz_conn.ovz_utils = ovz_utils
         self.mox.ReplayAll()
@@ -467,7 +476,7 @@ class OpenVzDriverTestCase(test.TestCase):
     def test_set_ioprio_success(self):
         self.mox.StubOutWithMock(openvz_conn.utils, 'execute')
         openvz_conn.utils.execute('vzctl', 'set', fakes.INSTANCE['id'], '--save',
-            '--ioprio', 3, run_as_root=True).AndReturn(
+            '--ioprio', mox.IgnoreArg(), run_as_root=True).AndReturn(
             ('', fakes.ERRORMSG))
         conn = openvz_conn.OpenVzDriver(False)
         self.mox.StubOutWithMock(conn, '_percent_of_resource')
@@ -479,7 +488,7 @@ class OpenVzDriverTestCase(test.TestCase):
     def test_set_ioprio_failure(self):
         self.mox.StubOutWithMock(openvz_conn.utils, 'execute')
         openvz_conn.utils.execute('vzctl', 'set', fakes.INSTANCE['id'], '--save',
-            '--ioprio', 3, run_as_root=True).AndRaise(
+            '--ioprio', mox.IgnoreArg(), run_as_root=True).AndRaise(
             exception.InstanceUnacceptable)
         conn = openvz_conn.OpenVzDriver(False)
         self.mox.StubOutWithMock(conn, '_percent_of_resource')
@@ -546,10 +555,15 @@ class OpenVzDriverTestCase(test.TestCase):
             exception.InstanceUnacceptable)
         self.mox.ReplayAll()
         conn = openvz_conn.OpenVzDriver(False)
-        conn._send_garp(fakes.INSTANCE['id'], fakes.NETWORKINFO[0][1]['ips'][0]['ip'],
+        self.assertRaises(exception.InstanceUnacceptable, conn._send_garp, fakes.INSTANCE['id'], fakes.NETWORKINFO[0][1]['ips'][0]['ip'],
             fakes.NETWORKINFO[0][0]['bridge_interface'])
 
     def test_init_host_success(self):
+        self.mox.StubOutWithMock(openvz_conn, 'OVZTcRules')
+        openvz_conn.OVZTcRules(mox.IgnoreArg()).AndReturn(fakes.FakeOVZTcRules())
+        self.mox.StubOutWithMock(ovz_utils.utils, 'execute')
+        ovz_utils.utils.execute('vzcpucheck', run_as_root=True).AndReturn(
+            (fakes.CPUCHECKNOCONT, fakes.ERRORMSG))
         self.mox.StubOutWithMock(openvz_conn.context, 'get_admin_context')
         openvz_conn.context.get_admin_context().AndReturn(fakes.ADMINCONTEXT)
         self.mox.StubOutWithMock(openvz_conn.db, 'instance_get_all_by_host')
@@ -557,20 +571,20 @@ class OpenVzDriverTestCase(test.TestCase):
             socket.gethostname())\
         .MultipleTimes().AndReturn(fakes.INSTANCES)
         ovz_conn = openvz_conn.OpenVzDriver(False)
+        self.mox.StubOutWithMock(ovz_conn, '_refresh_host_stats')
+        ovz_conn._refresh_host_stats()
         self.mox.StubOutWithMock(ovz_conn, 'get_info')
         ovz_conn.get_info(fakes.INSTANCE).MultipleTimes()\
         .AndReturn(fakes.GOODSTATUS)
         self.mox.StubOutWithMock(openvz_conn.db, 'instance_update')
-        openvz_conn.db.instance_update(fakes.ADMINCONTEXT, fakes.INSTANCE['id'],
-            {'power_state': power_state.RUNNING})
+        openvz_conn.db.instance_update(fakes.ADMINCONTEXT, fakes.INSTANCE['uuid'],
+            {'power_state': power_state.RUNNING}).MultipleTimes()
         self.mox.StubOutWithMock(ovz_conn, '_get_cpulimit')
         ovz_conn._get_cpulimit()
         self.mox.ReplayAll()
         ovz_conn.init_host()
 
     def test_init_host_not_found(self):
-        self.mox.StubOutWithMock(openvz_conn.context, 'get_admin_context')
-        openvz_conn.context.get_admin_context().AndReturn(fakes.ADMINCONTEXT)
         self.mox.StubOutWithMock(openvz_conn.db, 'instance_get_all_by_host')
         openvz_conn.db.instance_get_all_by_host(mox.IgnoreArg(),
             socket.gethostname())\
@@ -578,11 +592,8 @@ class OpenVzDriverTestCase(test.TestCase):
         ovz_conn = openvz_conn.OpenVzDriver(False)
         self.mox.StubOutWithMock(ovz_conn, 'get_info')
         ovz_conn.get_info(fakes.INSTANCE).AndRaise(exception.NotFound)
-        self.mox.StubOutWithMock(openvz_conn.db, 'instance_destroy')
-        openvz_conn.db.instance_destroy(fakes.ADMINCONTEXT, fakes.INSTANCE['id'])\
-        .MultipleTimes()
-        self.mox.StubOutWithMock(ovz_conn, '_get_cpulimit')
-        ovz_conn._get_cpulimit()
+        #self.mox.StubOutWithMock(openvz_conn.db, 'instance_destroy')
+        #openvz_conn.db.instance_destroy(fakes.ADMINCONTEXT, fakes.INSTANCE['id'])
         self.mox.ReplayAll()
         self.assertRaises(exception.NotFound, ovz_conn.init_host)
 
@@ -659,6 +670,10 @@ class OpenVzDriverTestCase(test.TestCase):
             ovz_conn._find_by_name, fakes.INSTANCE['name'])
 
     def test_plug_vifs(self):
+        self.mox.StubOutWithMock(openvz_net, 'OVZShutdownFile')
+        openvz_net.OVZShutdownFile(fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(fakes.FakeOVZShutdownFile(fakes.INSTANCE['id'], 700))
+        self.mox.StubOutWithMock(openvz_net, 'OVZBootFile')
+        openvz_net.OVZBootFile(fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(fakes.FakeOVZBootFile(fakes.INSTANCE['id'], 700))
         ovz_conn = openvz_conn.OpenVzDriver(False)
         ovz_conn.vif_driver = mox.MockAnything()
         ovz_conn.vif_driver.plug(fakes.INSTANCE, mox.IgnoreArg(), mox.IgnoreArg())
@@ -673,8 +688,10 @@ class OpenVzDriverTestCase(test.TestCase):
         .AndReturn(fakes.ADMINCONTEXT)
         self.mox.StubOutWithMock(openvz_conn, 'OVZShutdownFile')
         openvz_conn.OVZShutdownFile(fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(fakes.FakeOVZShutdownFile(fakes.INSTANCE['id'], 700))
+        self.mox.StubOutWithMock(openvz_conn, 'OVZBootFile')
+        openvz_conn.OVZBootFile(fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(fakes.FakeOVZBootFile(fakes.INSTANCE['id'], 700))
         self.mox.StubOutWithMock(openvz_conn.db, 'instance_update')
-        openvz_conn.db.instance_update(fakes.ADMINCONTEXT, fakes.INSTANCE['id'],
+        openvz_conn.db.instance_update(fakes.ADMINCONTEXT, fakes.INSTANCE['uuid'],
             mox.IgnoreArg()).MultipleTimes()
         self.mox.StubOutWithMock(openvz_conn.utils, 'execute')
         openvz_conn.utils.execute('vzctl', 'restart', fakes.INSTANCE['id'],
@@ -693,10 +710,10 @@ class OpenVzDriverTestCase(test.TestCase):
         .AndReturn(fakes.ADMINCONTEXT)
         self.mox.StubOutWithMock(openvz_conn, 'OVZShutdownFile')
         openvz_conn.OVZShutdownFile(fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(fakes.FakeOVZShutdownFile(fakes.INSTANCE['id'], 700))
-        self.mox.StubOutWithMock(openvz_conn, 'OVZBootFile')
-        openvz_conn.OVZBootFile(fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(fakes.FakeOVZBootFile(fakes.INSTANCE['id'], 700))
+        #self.mox.StubOutWithMock(openvz_conn, 'OVZBootFile')
+        #openvz_conn.OVZBootFile(fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(fakes.FakeOVZBootFile(fakes.INSTANCE['id'], 700))
         self.mox.StubOutWithMock(openvz_conn.db, 'instance_update')
-        openvz_conn.db.instance_update(fakes.ADMINCONTEXT, fakes.INSTANCE['id'],
+        openvz_conn.db.instance_update(fakes.ADMINCONTEXT, fakes.INSTANCE['uuid'],
             mox.IgnoreArg()).MultipleTimes()
         self.mox.StubOutWithMock(openvz_conn.utils, 'execute')
         openvz_conn.utils.execute('vzctl', 'restart', fakes.INSTANCE['id'],
@@ -705,19 +722,20 @@ class OpenVzDriverTestCase(test.TestCase):
         self.mox.StubOutWithMock(ovz_conn, 'get_info')
         ovz_conn.get_info(fakes.INSTANCE).AndRaise(exception.NotFound)
         self.mox.ReplayAll()
+        #timer = self.assertRaises(exception.NotFound, ovz_conn.reboot, fakes.INSTANCE, fakes.NETWORKINFO, 'hard')
         timer = ovz_conn.reboot(fakes.INSTANCE, fakes.NETWORKINFO, 'hard')
-        timer.wait()
+        self.assertRaises(exception.NotFound, timer.wait)
 
     def test_reboot_fail_because_not_found(self):
         self.mox.StubOutWithMock(openvz_conn, 'OVZShutdownFile')
-        openvz_conn.OVZShutdownFile(fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(fakes.FakeOVZShutdownFile(fakes.FakeOVZShutdownFile(fakes.INSTANCE['id'], 700)))
-        self.mox.StubOutWithMock(openvz_conn, 'OVZBootFile')
-        openvz_conn.OVZBootFile(fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(fakes.FakeOVZBootFile(fakes.FakeOVZBootFile(fakes.INSTANCE['id'], 700)))
+        openvz_conn.OVZShutdownFile(fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(fakes.FakeOVZShutdownFile(fakes.INSTANCE['id'], 700))
+        #self.mox.StubOutWithMock(openvz_conn, 'OVZBootFile')
+        #openvz_conn.OVZBootFile(fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(fakes.FakeOVZBootFile(fakes.INSTANCE['id'], 700))
         self.mox.StubOutWithMock(openvz_conn.context, 'get_admin_context')
         openvz_conn.context.get_admin_context().MultipleTimes()\
         .AndReturn(fakes.ADMINCONTEXT)
         self.mox.StubOutWithMock(openvz_conn.db, 'instance_update')
-        openvz_conn.db.instance_update(fakes.ADMINCONTEXT, fakes.INSTANCE['id'],
+        openvz_conn.db.instance_update(fakes.ADMINCONTEXT, fakes.INSTANCE['uuid'],
             mox.IgnoreArg()).MultipleTimes()
         self.mox.StubOutWithMock(openvz_conn.utils, 'execute')
         openvz_conn.utils.execute('vzctl', 'restart', fakes.INSTANCE['id'],
@@ -731,13 +749,11 @@ class OpenVzDriverTestCase(test.TestCase):
 
     def test_reboot_failure(self):
         self.mox.StubOutWithMock(openvz_conn, 'OVZShutdownFile')
-        openvz_conn.OVZShutdownFile.AndReturn(fakes.INSTANCE['id'], mox.IgnoreArg())
-        self.mox.StubOutWithMock(openvz_conn, 'OVZBootFile')
-        openvz_conn.OVZBootFile.AndReturn(fakes.INSTANCE['id'], mox.IgnoreArg())
+        openvz_conn.OVZShutdownFile(fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(fakes.FakeOVZShutdownFile(fakes.INSTANCE['id'], 700))
         self.mox.StubOutWithMock(openvz_conn.context, 'get_admin_context')
         openvz_conn.context.get_admin_context().AndReturn(fakes.ADMINCONTEXT)
         self.mox.StubOutWithMock(openvz_conn.db, 'instance_update')
-        openvz_conn.db.instance_update(fakes.ADMINCONTEXT, fakes.INSTANCE['id'],
+        openvz_conn.db.instance_update(fakes.ADMINCONTEXT, fakes.INSTANCE['uuid'],
             {'power_state': power_state.PAUSED})
         self.mox.StubOutWithMock(openvz_conn.utils, 'execute')
         openvz_conn.utils.execute('vzctl', 'restart', fakes.INSTANCE['id'],
@@ -772,12 +788,12 @@ class OpenVzDriverTestCase(test.TestCase):
     def test_pause_success(self):
         self.mox.StubOutWithMock(openvz_conn, 'OVZShutdownFile')
         openvz_conn.OVZShutdownFile(fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(fakes.FakeOVZShutdownFile(fakes.INSTANCE['id'], 700))
-        self.mox.StubOutWithMock(openvz_conn, 'OVZBootFile')
+        self.mox.StubOutWithMock(openvz_conn.utils, 'execute')
         openvz_conn.utils.execute('vzctl', 'stop', fakes.INSTANCE['id'],
             run_as_root=True).AndReturn(('', fakes.ERRORMSG))
         self.mox.StubOutWithMock(openvz_conn.db, 'instance_update')
         openvz_conn.db.instance_update(mox.IgnoreArg(),
-            fakes.INSTANCE['id'],
+            fakes.INSTANCE['uuid'],
             {'power_state': power_state.SHUTDOWN})
         self.mox.ReplayAll()
         conn = openvz_conn.OpenVzDriver(False)
@@ -796,12 +812,14 @@ class OpenVzDriverTestCase(test.TestCase):
             conn.pause, fakes.INSTANCE)
 
     def test_suspend_success(self):
+        self.mox.StubOutWithMock(openvz_conn.context, 'get_admin_context')
+        openvz_conn.context.get_admin_context().AndReturn(fakes.ADMINCONTEXT)
         self.mox.StubOutWithMock(openvz_conn.utils, 'execute')
         openvz_conn.utils.execute('vzctl', 'chkpnt', fakes.INSTANCE['id'],
             '--suspend', run_as_root=True).AndReturn(('', fakes.ERRORMSG))
         self.mox.StubOutWithMock(openvz_conn.db, 'instance_update')
         openvz_conn.db.instance_update(fakes.ADMINCONTEXT,
-            fakes.INSTANCE['id'],
+            fakes.INSTANCE['uuid'],
             {'power_state': power_state.SUSPENDED})
         self.mox.ReplayAll()
         conn = openvz_conn.OpenVzDriver(False)
@@ -818,12 +836,14 @@ class OpenVzDriverTestCase(test.TestCase):
             conn.suspend, fakes.INSTANCE)
 
     def test_unpause_success(self):
+        self.mox.StubOutWithMock(openvz_conn, 'OVZBootFile')
+        openvz_conn.OVZBootFile(fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(fakes.FakeOVZBootFile(fakes.INSTANCE['id'], 700))
         self.mox.StubOutWithMock(openvz_conn.utils, 'execute')
         openvz_conn.utils.execute('vzctl', 'start', fakes.INSTANCE['id'],
             run_as_root=True).AndReturn(('', fakes.ERRORMSG))
         self.mox.StubOutWithMock(openvz_conn.db, 'instance_update')
         openvz_conn.db.instance_update(mox.IgnoreArg(),
-            fakes.INSTANCE['id'],
+            fakes.INSTANCE['uuid'],
             {'power_state': power_state.RUNNING})
 
         self.mox.ReplayAll()
@@ -842,26 +862,26 @@ class OpenVzDriverTestCase(test.TestCase):
 
     def test_resume_success(self):
         self.mox.StubOutWithMock(openvz_conn.utils, 'execute')
-        openvz_conn.utils.execute('vzctl', 'start', fakes.INSTANCE['id'],
-            run_as_root=True).AndReturn(('', fakes.ERRORMSG))
+        openvz_conn.utils.execute('vzctl', 'chkpnt', fakes.INSTANCE['id'],
+            '--resume', run_as_root=True).AndReturn(('', fakes.ERRORMSG))
         self.mox.StubOutWithMock(openvz_conn.db, 'instance_update')
         openvz_conn.db.instance_update(mox.IgnoreArg(),
-            fakes.INSTANCE['id'],
+            fakes.INSTANCE['uuid'],
             {'power_state': power_state.RUNNING})
 
         self.mox.ReplayAll()
         conn = openvz_conn.OpenVzDriver(True)
-        conn.resume(fakes.INSTANCE)
+        conn.resume(fakes.INSTANCE, fakes.NETWORKINFO)
 
     def test_resume_failure(self):
         self.mox.StubOutWithMock(openvz_conn.utils, 'execute')
-        openvz_conn.utils.execute('vzctl', 'start', fakes.INSTANCE['id'],
-            run_as_root=True).AndRaise(
+        openvz_conn.utils.execute('vzctl', 'chkpnt', fakes.INSTANCE['id'],
+            '--resume', run_as_root=True).AndRaise(
             exception.InstanceUnacceptable)
         self.mox.ReplayAll()
         conn = openvz_conn.OpenVzDriver(False)
         self.assertRaises(exception.InstanceUnacceptable,
-            conn.resume, fakes.INSTANCE)
+            conn.resume, fakes.INSTANCE, None, None)
 
     def test_destroy_fail_on_exec(self):
         ovz_conn = openvz_conn.OpenVzDriver(False)
@@ -887,8 +907,7 @@ class OpenVzDriverTestCase(test.TestCase):
         ovz_conn.get_info(fakes.INSTANCE).AndReturn(fakes.GOODSTATUS)
         self.mox.StubOutWithMock(openvz_conn.utils, 'execute')
         openvz_conn.utils.execute('vzctl', 'destroy', fakes.INSTANCE['id'],
-            run_as_root=True).AndRaise(
-            exception.NotFound)
+            run_as_root=True).AndRaise(exception.InstanceNotFound)
         self.mox.StubOutWithMock(ovz_conn, '_clean_orphaned_directories')
         ovz_conn._clean_orphaned_directories(fakes.INSTANCE['id'])
         self.mox.StubOutWithMock(ovz_conn, '_clean_orphaned_files')
@@ -921,11 +940,13 @@ class OpenVzDriverTestCase(test.TestCase):
         self.assertEqual(meta['state'], power_state.SHUTDOWN)
 
     def test_get_info_no_state(self):
-        # Create a copy of instance to overwrite it's state
         self.mox.StubOutWithMock(openvz_conn.context, 'get_admin_context')
         openvz_conn.context.get_admin_context().MultipleTimes()\
         .AndReturn(fakes.ADMINCONTEXT)
         ovz_conn = openvz_conn.OpenVzDriver(False)
+        self.mox.StubOutWithMock(openvz_conn.db, 'instance_update')
+        openvz_conn.db.instance_update(fakes.ADMINCONTEXT,
+            fakes.INSTANCE['uuid'], {'power_state': power_state.NOSTATE})
         self.mox.StubOutWithMock(ovz_conn, '_find_by_name')
         ovz_conn._find_by_name(fakes.INSTANCE['name']).AndReturn(fakes.FINDBYNAMENOSTATE)
         self.mox.ReplayAll()
@@ -1003,8 +1024,8 @@ class OpenVzDriverTestCase(test.TestCase):
 
     def test_spawn_success(self):
         self.mox.StubOutWithMock(openvz_conn.db, 'instance_update')
-        openvz_conn.db.instance_update(fakes.ADMINCONTEXT, fakes.INSTANCE['id'],
-            mox.IgnoreArg()).MultipleTimes()
+        openvz_conn.db.instance_update(fakes.ADMINCONTEXT, fakes.INSTANCE['uuid'],
+            mox.IgnoreArg())
         ovz_conn = openvz_conn.OpenVzDriver(False)
         self.mox.StubOutWithMock(ovz_conn, '_get_cpuunits_usage')
         ovz_conn._get_cpuunits_usage()
@@ -1016,6 +1037,8 @@ class OpenVzDriverTestCase(test.TestCase):
         ovz_conn._set_vz_os_hint(fakes.INSTANCE)
         self.mox.StubOutWithMock(ovz_conn, '_configure_vz')
         ovz_conn._configure_vz(fakes.INSTANCE)
+        self.mox.StubOutWithMock(ovz_conn, '_set_onboot')
+        ovz_conn._set_onboot(fakes.INSTANCE)
         self.mox.StubOutWithMock(ovz_conn, '_set_name')
         ovz_conn._set_name(fakes.INSTANCE)
         self.mox.StubOutWithMock(ovz_conn, 'plug_vifs')
@@ -1025,7 +1048,7 @@ class OpenVzDriverTestCase(test.TestCase):
         self.mox.StubOutWithMock(ovz_conn, '_set_instance_size')
         ovz_conn._set_instance_size(fakes.INSTANCE)
         self.mox.StubOutWithMock(ovz_conn, '_attach_volumes')
-        ovz_conn._attach_volumes(fakes.INSTANCE)
+        ovz_conn._attach_volumes(fakes.INSTANCE['name'], fakes.BDM)
         self.mox.StubOutWithMock(ovz_conn, '_start')
         ovz_conn._start(fakes.INSTANCE)
         self.mox.StubOutWithMock(ovz_conn, '_initial_secure_host')
@@ -1038,12 +1061,12 @@ class OpenVzDriverTestCase(test.TestCase):
         self.mox.StubOutWithMock(ovz_conn, 'get_info')
         ovz_conn.get_info(fakes.INSTANCE).AndReturn(fakes.GOODSTATUS)
         self.mox.ReplayAll()
-        timer = ovz_conn.spawn(fakes.ADMINCONTEXT, fakes.INSTANCE, None, fakes.NETWORKINFO)
+        timer = ovz_conn.spawn(fakes.ADMINCONTEXT, fakes.INSTANCE, None, None, fakes.ROOTPASS, fakes.NETWORKINFO, fakes.BDM)
         timer.wait()
 
     def test_spawn_failure(self):
         self.mox.StubOutWithMock(openvz_conn.db, 'instance_update')
-        openvz_conn.db.instance_update(fakes.ADMINCONTEXT, fakes.INSTANCE['id'],
+        openvz_conn.db.instance_update(fakes.ADMINCONTEXT, fakes.INSTANCE['uuid'],
             mox.IgnoreArg()).MultipleTimes()
         ovz_conn = openvz_conn.OpenVzDriver(False)
         self.mox.StubOutWithMock(ovz_conn, '_get_cpuunits_usage')
@@ -1056,6 +1079,8 @@ class OpenVzDriverTestCase(test.TestCase):
         ovz_conn._set_vz_os_hint(fakes.INSTANCE)
         self.mox.StubOutWithMock(ovz_conn, '_configure_vz')
         ovz_conn._configure_vz(fakes.INSTANCE)
+        self.mox.StubOutWithMock(ovz_conn, '_set_onboot')
+        ovz_conn._set_onboot(fakes.INSTANCE)
         self.mox.StubOutWithMock(ovz_conn, '_set_name')
         ovz_conn._set_name(fakes.INSTANCE)
         self.mox.StubOutWithMock(ovz_conn, 'plug_vifs')
@@ -1065,7 +1090,7 @@ class OpenVzDriverTestCase(test.TestCase):
         self.mox.StubOutWithMock(ovz_conn, '_set_instance_size')
         ovz_conn._set_instance_size(fakes.INSTANCE)
         self.mox.StubOutWithMock(ovz_conn, '_attach_volumes')
-        ovz_conn._attach_volumes(fakes.INSTANCE)
+        ovz_conn._attach_volumes(fakes.INSTANCE['name'], fakes.BDM)
         self.mox.StubOutWithMock(ovz_conn, '_start')
         ovz_conn._start(fakes.INSTANCE)
         self.mox.StubOutWithMock(ovz_conn, '_initial_secure_host')
@@ -1078,5 +1103,5 @@ class OpenVzDriverTestCase(test.TestCase):
         self.mox.StubOutWithMock(ovz_conn, 'get_info')
         ovz_conn.get_info(fakes.INSTANCE).AndRaise(exception.NotFound)
         self.mox.ReplayAll()
-        timer = ovz_conn.spawn(fakes.ADMINCONTEXT, fakes.INSTANCE, None, fakes.NETWORKINFO)
+        timer = ovz_conn.spawn(fakes.ADMINCONTEXT, fakes.INSTANCE, None, None, fakes.ROOTPASS, fakes.NETWORKINFO, fakes.BDM)
         timer.wait()
