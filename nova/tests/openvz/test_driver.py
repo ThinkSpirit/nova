@@ -584,17 +584,22 @@ class OpenVzDriverTestCase(test.TestCase):
             fakes.NETWORKINFO[0][0]['bridge_interface'])
 
     def test_init_host_success(self):
+        self.mox.StubOutWithMock(openvz_conn, 'OVZBootFile')
+        openvz_conn.OVZBootFile(
+            mox.IgnoreArg(), mox.IgnoreArg()).AndReturn(
+                fakes.FakeOVZBootFile(0, 700))
+        self.mox.StubOutWithMock(openvz_conn, 'OVZShutdownFile')
+        openvz_conn.OVZShutdownFile(
+            mox.IgnoreArg(), mox.IgnoreArg()).AndReturn(
+                fakes.FakeOVZShutdownFile(0, 700))
         self.mox.StubOutWithMock(openvz_conn, 'OVZTcRules')
-        openvz_conn.OVZTcRules().AndReturn(fakes.FakeOVZTcRules)
-        self.mox.StubOutWithMock(ovz_utils.utils, 'execute')
-        ovz_utils.utils.execute('vzcpucheck', run_as_root=True).AndReturn(
-            (fakes.CPUCHECKNOCONT, fakes.ERRORMSG))
+        openvz_conn.OVZTcRules().AndReturn(fakes.FakeOVZTcRules())
         self.mox.StubOutWithMock(openvz_conn.context, 'get_admin_context')
         openvz_conn.context.get_admin_context().AndReturn(fakes.ADMINCONTEXT)
         self.mox.StubOutWithMock(openvz_conn.db, 'instance_get_all_by_host')
         openvz_conn.db.instance_get_all_by_host(
             mox.IgnoreArg(), socket.gethostname()).MultipleTimes().AndReturn(
-                fakes.INSTANCES)
+                [fakes.INSTANCE])
         ovz_conn = openvz_conn.OpenVzDriver(False)
         self.mox.StubOutWithMock(ovz_conn, '_refresh_host_stats')
         ovz_conn._refresh_host_stats()

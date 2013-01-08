@@ -29,7 +29,7 @@ CONF = cfg.CONF
 LOG = logging.getLogger('nova.virt.openvz.network_drivers.tc')
 
 
-class OVZTcRules():
+class OVZTcRules(object):
     # Set our class variables if they don't exist
     # TODO(imsplitbit): figure out if there is a more pythonic way to do this
     try:

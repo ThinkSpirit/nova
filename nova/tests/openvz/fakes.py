@@ -156,6 +156,8 @@ class AdminContext(Context):
         self.is_admin = True
 
 
+# Stubs for faked file operations to allow unittests to test code paths
+# without actually leaving file turds around the test box.
 class FakeOvzFile(object):
     def __init__(self, filename, perms):
         self.filename = filename
@@ -199,6 +201,18 @@ class FakeOvzFile(object):
 
     def set_contents(self, contents):
         self.contents = contents
+
+    def make_proper_script(self):
+        return
+
+    def append(self, contents):
+        self.contents = self.contents + contents
+
+    def prepend(self, contents):
+        self.contents = contents + self.contents
+
+    def write(self):
+        return
 
 
 class FakeOVZShutdownFile(FakeOvzFile):
