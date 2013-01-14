@@ -229,6 +229,11 @@ class FakeOVZBootFile(FakeOvzFile):
         super(FakeOVZBootFile, self).__init__(filename, permissions)
 
 
+class FakeOVZNetworkFile(FakeOvzFile):
+    def __init__(self, filename):
+        self.filename = filename
+
+
 ROOTPASS = '2s3cUr3'
 
 USER = {'user': 'admin', 'role': 'admin', 'id': 1}
@@ -482,7 +487,7 @@ NETWORKINFO = [
 
 INTERFACEINFO = [
     {
-        'id': 1,
+        'id': 1002,
         'interface_number': 0,
         'bridge': 'br100',
         'name': 'eth0',
@@ -497,7 +502,7 @@ INTERFACEINFO = [
         'netmask_v6': None
     },
     {
-        'id': 1,
+        'id': 1002,
         'interface_number': 1,
         'bridge': 'br200',
         'name': 'eth1',

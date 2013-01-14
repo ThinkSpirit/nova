@@ -50,25 +50,8 @@ class OpenVzVolumeTestCase(test.TestCase):
         self.fake_file.writelines(mox.IgnoreArg())
         self.fake_file.read().AndReturn(fakes.FILECONTENTS)
 
-    def test_make_directory_success(self):
-        self.mox.StubOutWithMock(openvz_conn.utils, 'execute')
-        openvz_conn.utils.execute('mkdir', '-p', fakes.TEMPFILE, run_as_root=True)\
-        .AndReturn(('', fakes.ERRORMSG))
-        self.mox.ReplayAll()
-        fh = OVZFile(fakes.TEMPFILE)
-        fh.make_dir(fakes.TEMPFILE)
-
-    def test_make_directory_failure(self):
-        self.mox.StubOutWithMock(openvz_conn.utils, 'execute')
-        openvz_conn.utils.execute('mkdir', '-p', fakes.TEMPFILE, run_as_root=True)\
-        .AndRaise(exception.InstanceUnacceptable)
-        self.mox.ReplayAll()
-        fh = OVZFile(fakes.TEMPFILE)
-        self.assertRaises(exception.InstanceUnacceptable,
-            fh.make_dir, fakes.TEMPFILE)
-
     def test_touch_file_success(self):
-        fh = OVZFile(fakes.TEMPFILE)
+        fh = OVZFile(fakes.TEMPFILE, 755)
         self.mox.StubOutWithMock(fh, 'make_path')
         fh.make_path()
         self.mox.StubOutWithMock(openvz_conn.utils, 'execute')
@@ -78,7 +61,7 @@ class OpenVzVolumeTestCase(test.TestCase):
         fh.touch()
 
     def test_touch_file_failure(self):
-        fh = OVZFile(fakes.TEMPFILE)
+        fh = OVZFile(fakes.TEMPFILE, 755)
         self.mox.StubOutWithMock(fh, 'make_path')
         fh.make_path()
         self.mox.StubOutWithMock(openvz_conn.utils, 'execute')
@@ -91,28 +74,28 @@ class OpenVzVolumeTestCase(test.TestCase):
         self.mox.StubOutWithMock(__builtin__, 'open')
         __builtin__.open(mox.IgnoreArg(), 'r').AndReturn(self.fake_file)
         self.mox.ReplayAll()
-        fh = OVZFile(fakes.TEMPFILE)
+        fh = OVZFile(fakes.TEMPFILE, 755)
         fh.read()
 
     def test_read_file_failure(self):
         self.mox.StubOutWithMock(__builtin__, 'open')
         __builtin__.open(mox.IgnoreArg(), 'r').AndRaise(exception.FileNotFound)
         self.mox.ReplayAll()
-        fh = OVZFile(fakes.TEMPFILE)
+        fh = OVZFile(fakes.TEMPFILE, 755)
         self.assertRaises(exception.FileNotFound, fh.read)
 
     def test_write_to_file_success(self):
         self.mox.StubOutWithMock(__builtin__, 'open')
         __builtin__.open(mox.IgnoreArg(), 'w').AndReturn(self.fake_file)
         self.mox.ReplayAll()
-        fh = OVZFile(fakes.TEMPFILE)
+        fh = OVZFile(fakes.TEMPFILE, 755)
         fh.write()
 
     def test_write_to_file_failure(self):
         self.mox.StubOutWithMock(__builtin__, 'open')
         __builtin__.open(mox.IgnoreArg(), 'w').AndRaise(exception.FileNotFound)
         self.mox.ReplayAll()
-        fh = OVZFile(fakes.TEMPFILE)
+        fh = OVZFile(fakes.TEMPFILE, 755)
         self.assertRaises(exception.FileNotFound, fh.write)
 
     def test_set_perms_success(self):
@@ -120,7 +103,7 @@ class OpenVzVolumeTestCase(test.TestCase):
         openvz_conn.utils.execute('chmod', 755, fakes.TEMPFILE, run_as_root=True)\
         .AndReturn(('', fakes.ERRORMSG))
         self.mox.ReplayAll()
-        fh = OVZFile(fakes.TEMPFILE)
+        fh = OVZFile(fakes.TEMPFILE, 755)
         fh.set_permissions(755)
 
     def test_set_perms_failure(self):
@@ -128,7 +111,7 @@ class OpenVzVolumeTestCase(test.TestCase):
         openvz_conn.utils.execute('chmod', 755, fakes.TEMPFILE, run_as_root=True)\
         .AndRaise(exception.InstanceUnacceptable)
         self.mox.ReplayAll()
-        fh = OVZFile(fakes.TEMPFILE)
+        fh = OVZFile(fakes.TEMPFILE, 755)
         self.assertRaises(exception.InstanceUnacceptable,
             fh.set_permissions, 755)
 
@@ -139,12 +122,12 @@ class OpenVzVolumeTestCase(test.TestCase):
         self.mox.StubOutWithMock(openvz_conn.os.path, 'exists')
         openvz_conn.os.path.exists(mox.IgnoreArg()).AndReturn(False)
         self.mox.ReplayAll()
-        fh = OVZFile(fakes.TEMPFILE)
+        fh = OVZFile(fakes.TEMPFILE, 755)
         fh.make_path()
 
     def test_make_path_and_dir_exists(self):
         self.mox.StubOutWithMock(openvz_conn.os.path, 'exists')
         openvz_conn.os.path.exists(mox.IgnoreArg()).AndReturn(True)
         self.mox.ReplayAll()
-        fh = OVZFile(fakes.TEMPFILE)
+        fh = OVZFile(fakes.TEMPFILE, 755)
         fh.make_path()
