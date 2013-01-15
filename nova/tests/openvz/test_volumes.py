@@ -35,9 +35,11 @@ class OpenVzVolumeTestCase(test.TestCase):
         try:
             CONF.injected_network_template
         except AttributeError as err:
-            CONF.register_opt(cfg.StrOpt('injected_network_template',
-                default='nova/virt/interfaces.template',
-                help='Stub for network template for testing purposes')
+            CONF.register_opt(
+                cfg.StrOpt(
+                    'injected_network_template',
+                    default='nova/virt/interfaces.template',
+                    help='Stub for network template for testing purposes')
             )
         CONF.use_ipv6 = False
         self.fake_file = mox.MockAnything()

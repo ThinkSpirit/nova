@@ -40,9 +40,9 @@ class FakeOVZTcRules(object):
     def __init__(self):
         if not len(FakeOVZTcRules.available_ids):
             FakeOVZTcRules.available_ids = [
-            i for i in range(1, CONF.ovz_tc_id_max)
+                i for i in range(1, CONF.ovz_tc_id_max)
             ]
-
+        self.instance_type = {'memory_mb': 512}
         self._remove_used_ids()
 
     def instance_info(self, instance_id, address, vz_iface):
@@ -52,9 +52,9 @@ class FakeOVZTcRules(object):
 
         self.address = address
         self.vz_iface = vz_iface
-        self.bandwidth = int(round(self.instance_type['memory_mb'] /
-                                   CONF.ovz_memory_unit_size)) *\
-                         CONF.ovz_tc_mbit_per_unit
+        self.bandwidth = int(
+            round(self.instance_type['memory_mb'] /
+                  CONF.ovz_memory_unit_size)) * CONF.ovz_tc_mbit_per_unit
         self.tc_id = self._get_instance_tc_id()
         if not self.tc_id:
             self.tc_id = self.get_id()
@@ -125,7 +125,7 @@ class FakeOVZTcRules(object):
             0, len(FakeOVZTcRules.available_ids) - 1)]
 
     def _list_existing_ids(self):
-        return [1,3,6]
+        return [1, 3, 6]
 
     def _reserve_id(self, id):
         FakeOVZTcRules.inflight_ids.append(id)
@@ -232,6 +232,7 @@ class FakeOVZBootFile(FakeOvzFile):
 class FakeOVZNetworkFile(FakeOvzFile):
     def __init__(self, filename):
         self.filename = filename
+        super(FakeOVZNetworkFile, self).__init__(filename, 644)
 
 
 ROOTPASS = '2s3cUr3'
@@ -294,11 +295,13 @@ FINDBYNAME = VZLISTDETAIL.split()
 FINDBYNAME = {'name': FINDBYNAME[2], 'id': int(FINDBYNAME[0]),
               'state': FINDBYNAME[1]}
 FINDBYNAMENOSTATE = VZLISTDETAIL.split()
-FINDBYNAMENOSTATE = {'name': FINDBYNAMENOSTATE[2], 'id': int(FINDBYNAMENOSTATE[0]),
-                     'state': '-'}
+FINDBYNAMENOSTATE = {
+    'name': FINDBYNAMENOSTATE[2], 'id': int(FINDBYNAMENOSTATE[0]),
+    'state': '-'}
 FINDBYNAMESHUTDOWN = VZLISTDETAIL.split()
-FINDBYNAMESHUTDOWN = {'name': FINDBYNAMESHUTDOWN[2], 'id': int(FINDBYNAMESHUTDOWN[0]),
-                      'state': 'stopped'}
+FINDBYNAMESHUTDOWN = {
+    'name': FINDBYNAMESHUTDOWN[2], 'id': int(FINDBYNAMESHUTDOWN[0]),
+    'state': 'stopped'}
 
 VZNAME = """\tinstance-00001001\n"""
 
@@ -440,7 +443,7 @@ NETWORKINFO = [
                     u'ip': u'10.0.2.16',
                     u'netmask': u'255.255.255.0',
                     u'enabled':
-                        u'1'
+                    u'1'
                 }
             ],
             u'mac': u'02:16:3e:0c:2c:08',
@@ -472,7 +475,7 @@ NETWORKINFO = [
                 {
                     u'ip': u'10.0.4.16',
                     u'netmask':
-                        u'255.255.255.0',
+                    u'255.255.255.0',
                     u'enabled': u'1'
                 }
             ],
@@ -491,6 +494,7 @@ INTERFACEINFO = [
         'interface_number': 0,
         'bridge': 'br100',
         'name': 'eth0',
+        'vz_host_if': 'veth1002.eth0',
         'mac': '02:16:3e:0c:2c:08',
         'address': '10.0.2.16',
         'netmask': '255.255.255.0',
@@ -506,6 +510,7 @@ INTERFACEINFO = [
         'interface_number': 1,
         'bridge': 'br200',
         'name': 'eth1',
+        'vz_host_if': 'veth1002.eth1',
         'mac': '02:16:3e:40:5e:1b',
         'address': '10.0.4.16',
         'netmask': '255.255.255.0',

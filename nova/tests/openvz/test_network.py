@@ -40,9 +40,11 @@ class OpenVzNetworkTestCase(test.TestCase):
         try:
             CONF.injected_network_template
         except AttributeError as err:
-            CONF.register_opt(cfg.StrOpt('injected_network_template',
-                default='nova/virt/interfaces.template',
-                help='Stub for network template for testing purposes')
+            CONF.register_opt(
+                cfg.StrOpt(
+                    'injected_network_template',
+                    default='nova/virt/interfaces.template',
+                    help='Stub for network template for testing purposes')
             )
         CONF.use_ipv6 = False
         self.fake_file = mox.MockAnything()
@@ -54,81 +56,86 @@ class OpenVzNetworkTestCase(test.TestCase):
         self.mox.StubOutWithMock(openvz_net, 'OVZShutdownFile')
         openvz_net.OVZShutdownFile(
             fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(
-            fakes.FakeOVZShutdownFile(fakes.INSTANCE['id'], 700))
+                fakes.FakeOVZShutdownFile(fakes.INSTANCE['id'], 700))
         self.mox.StubOutWithMock(openvz_net, 'OVZBootFile')
         openvz_net.OVZBootFile(
             fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(
-            fakes.FakeOVZBootFile(fakes.INSTANCE['id'], 700))
-        self.mox.StubOutWithMock(OVZNetworkFile, 'append')
-        OVZNetworkFile.append(mox.IgnoreArg()).MultipleTimes()
-        self.mox.StubOutWithMock(OVZNetworkFile, 'write')
-        OVZNetworkFile.write().MultipleTimes()
-        self.mox.StubOutWithMock(OVZNetworkFile, 'set_permissions')
-        OVZNetworkFile.set_permissions(
-            mox.IgnoreArg()).MultipleTimes()
-        #self.mox.StubOutWithMock(__builtin__, 'open')
-        #__builtin__.open(mox.IgnoreArg()).AndReturn(StringIO(fakes.NETTEMPLATE))
-        ifaces = openvz_conn.OVZNetworkInterfaces(fakes.INTERFACEINFO)
-        self.mox.StubOutWithMock(ifaces, '_add_netif')
-        ifaces._add_netif(fakes.INTERFACEINFO[0]['id'],
+                fakes.FakeOVZBootFile(fakes.INSTANCE['id'], 700))
+        self.mox.StubOutWithMock(openvz_net, 'OVZTcRules')
+        openvz_net.OVZTcRules().MultipleTimes().AndReturn(
+            fakes.FakeOVZTcRules())
+        self.mox.StubOutWithMock(openvz_net.OVZNetworkInterfaces, '_add_netif')
+        openvz_net.OVZNetworkInterfaces._add_netif(
+            fakes.INTERFACEINFO[0]['id'],
             mox.IgnoreArg(),
             mox.IgnoreArg(),
             mox.IgnoreArg()).MultipleTimes()
-        self.mox.StubOutWithMock(ifaces, '_set_nameserver')
-        ifaces._set_nameserver(fakes.INTERFACEINFO[0]['id'], fakes.INTERFACEINFO[0]['dns'])
+        self.mox.StubOutWithMock(
+            openvz_net.OVZNetworkInterfaces, '_set_nameserver')
+        self.mox.StubOutWithMock(openvz_net, 'OVZNetworkFile')
+        openvz_net.OVZNetworkFile(
+            ('/var/lib/vz/private/%s/etc/network/interfaces' %
+             fakes.INSTANCE['id'])).AndReturn(
+                 fakes.FakeOVZNetworkFile('/etc/network/interfaces'))
+        openvz_net.OVZNetworkInterfaces._set_nameserver(
+            fakes.INTERFACEINFO[0]['id'], fakes.INTERFACEINFO[0]['dns'])
         self.mox.ReplayAll()
+        ifaces = openvz_conn.OVZNetworkInterfaces(fakes.INTERFACEINFO)
         ifaces.add()
 
     def test_ovz_network_interfaces_add_ip_success(self):
         self.mox.StubOutWithMock(openvz_net, 'OVZShutdownFile')
         openvz_net.OVZShutdownFile(
             fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(
-            fakes.FakeOVZShutdownFile(fakes.INSTANCE['id'], 700))
+                fakes.FakeOVZShutdownFile(fakes.INSTANCE['id'], 700))
         self.mox.StubOutWithMock(openvz_net, 'OVZBootFile')
         openvz_net.OVZBootFile(
             fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(
-            fakes.FakeOVZBootFile(fakes.INSTANCE['id'], 700))
+                fakes.FakeOVZBootFile(fakes.INSTANCE['id'], 700))
         self.mox.StubOutWithMock(openvz_conn.ovz_utils, 'execute')
-        openvz_conn.ovz_utils.execute('vzctl', 'set', fakes.INTERFACEINFO[0]['id'],
-            '--save', '--ipadd',
-            fakes.INTERFACEINFO[0]['address'],
-            run_as_root=True).AndReturn(('', fakes.ERRORMSG))
+        openvz_conn.ovz_utils.execute(
+            'vzctl', 'set', fakes.INTERFACEINFO[0]['id'], '--save', '--ipadd',
+            fakes.INTERFACEINFO[0]['address'], run_as_root=True).AndReturn(
+                ('', fakes.ERRORMSG))
         self.mox.ReplayAll()
         ifaces = openvz_conn.OVZNetworkInterfaces(fakes.INTERFACEINFO)
-        ifaces._add_ip(fakes.INTERFACEINFO[0]['id'], fakes.INTERFACEINFO[0]['address'])
+        ifaces._add_ip(
+            fakes.INTERFACEINFO[0]['id'], fakes.INTERFACEINFO[0]['address'])
 
     def test_ovz_network_interfaces_add_ip_failure(self):
         self.mox.StubOutWithMock(openvz_net, 'OVZShutdownFile')
         openvz_net.OVZShutdownFile(
             fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(
-            fakes.FakeOVZShutdownFile(fakes.INSTANCE['id'], 700))
+                fakes.FakeOVZShutdownFile(fakes.INSTANCE['id'], 700))
         self.mox.StubOutWithMock(openvz_net, 'OVZBootFile')
         openvz_net.OVZBootFile(
             fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(
-            fakes.FakeOVZBootFile(fakes.INSTANCE['id'], 700))
+                fakes.FakeOVZBootFile(fakes.INSTANCE['id'], 700))
         self.mox.StubOutWithMock(openvz_conn.ovz_utils, 'execute')
-        openvz_conn.ovz_utils.execute('vzctl', 'set', fakes.INTERFACEINFO[0]['id'],
-            '--save',
+        openvz_conn.ovz_utils.execute(
+            'vzctl', 'set', fakes.INTERFACEINFO[0]['id'], '--save',
             '--ipadd', fakes.INTERFACEINFO[0]['address'],
             run_as_root=True).AndRaise(
-            exception.InstanceUnacceptable)
+                exception.InstanceUnacceptable)
         self.mox.ReplayAll()
         ifaces = openvz_conn.OVZNetworkInterfaces(fakes.INTERFACEINFO)
-        self.assertRaises(exception.InstanceUnacceptable, ifaces._add_ip,
+        self.assertRaises(
+            exception.InstanceUnacceptable, ifaces._add_ip,
             fakes.INTERFACEINFO[0]['id'], fakes.INTERFACEINFO[0]['address'])
 
     def test_ovz_network_interfaces_add_netif(self):
         self.mox.StubOutWithMock(openvz_net, 'OVZShutdownFile')
         openvz_net.OVZShutdownFile(
             fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(
-            fakes.FakeOVZShutdownFile(fakes.INSTANCE['id'], 700))
+                fakes.FakeOVZShutdownFile(fakes.INSTANCE['id'], 700))
         self.mox.StubOutWithMock(openvz_net, 'OVZBootFile')
         openvz_net.OVZBootFile(
             fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(
-            fakes.FakeOVZBootFile(fakes.INSTANCE['id'], 700))
+                fakes.FakeOVZBootFile(fakes.INSTANCE['id'], 700))
         self.mox.StubOutWithMock(openvz_conn.ovz_utils, 'execute')
-        openvz_conn.ovz_utils.execute('vzctl', 'set', fakes.INTERFACEINFO[0]['id'],
-            '--save', '--netif_add',
+        openvz_conn.ovz_utils.execute(
+            'vzctl', 'set', fakes.INTERFACEINFO[0]['id'], '--save',
+            '--netif_add',
             '%s,,veth%s.%s,%s,%s' % (
                 fakes.INTERFACEINFO[0]['name'],
                 fakes.INTERFACEINFO[0]['id'],
@@ -149,11 +156,11 @@ class OpenVzNetworkTestCase(test.TestCase):
         self.mox.StubOutWithMock(openvz_net, 'OVZShutdownFile')
         openvz_net.OVZShutdownFile(
             fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(
-            fakes.FakeOVZShutdownFile(fakes.INSTANCE['id'], 700))
+                fakes.FakeOVZShutdownFile(fakes.INSTANCE['id'], 700))
         self.mox.StubOutWithMock(openvz_net, 'OVZBootFile')
         openvz_net.OVZBootFile(
             fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(
-            fakes.FakeOVZBootFile(fakes.INSTANCE['id'], 700))
+                fakes.FakeOVZBootFile(fakes.INSTANCE['id'], 700))
         self.mox.ReplayAll()
         ifaces = openvz_conn.OVZNetworkInterfaces(fakes.INTERFACEINFO)
         for filename in ifaces._filename_factory():
@@ -163,11 +170,11 @@ class OpenVzNetworkTestCase(test.TestCase):
         self.mox.StubOutWithMock(openvz_net, 'OVZShutdownFile')
         openvz_net.OVZShutdownFile(
             fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(
-            fakes.FakeOVZShutdownFile(fakes.INSTANCE['id'], 700))
+                fakes.FakeOVZShutdownFile(fakes.INSTANCE['id'], 700))
         self.mox.StubOutWithMock(openvz_net, 'OVZBootFile')
         openvz_net.OVZBootFile(
             fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(
-            fakes.FakeOVZBootFile(fakes.INSTANCE['id'], 700))
+                fakes.FakeOVZBootFile(fakes.INSTANCE['id'], 700))
         self.mox.StubOutWithMock(openvz_net.ovz_utils, 'execute')
         openvz_net.ovz_utils.execute(
             'vzctl', 'set', fakes.INTERFACEINFO[0]['id'], '--save',
@@ -182,20 +189,20 @@ class OpenVzNetworkTestCase(test.TestCase):
         self.mox.StubOutWithMock(openvz_net, 'OVZShutdownFile')
         openvz_net.OVZShutdownFile(
             fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(
-            fakes.FakeOVZShutdownFile(fakes.INSTANCE['id'], 700))
+                fakes.FakeOVZShutdownFile(fakes.INSTANCE['id'], 700))
         self.mox.StubOutWithMock(openvz_net, 'OVZBootFile')
         openvz_net.OVZBootFile(
             fakes.INSTANCE['id'], mox.IgnoreArg()).AndReturn(
-            fakes.FakeOVZBootFile(fakes.INSTANCE['id'], 700))
+                fakes.FakeOVZBootFile(fakes.INSTANCE['id'], 700))
         self.mox.StubOutWithMock(openvz_conn.ovz_utils, 'execute')
-        openvz_conn.ovz_utils.execute('vzctl', 'set', fakes.INTERFACEINFO[0]['id'],
-            '--save', '--nameserver',
-            fakes.INTERFACEINFO[0]['dns'], run_as_root=True)\
-        .AndRaise(exception.InstanceUnacceptable)
+        openvz_conn.ovz_utils.execute(
+            'vzctl', 'set', fakes.INTERFACEINFO[0]['id'], '--save',
+            '--nameserver', fakes.INTERFACEINFO[0]['dns'],
+            run_as_root=True).AndRaise(exception.InstanceUnacceptable)
         self.mox.ReplayAll()
         ifaces = openvz_conn.OVZNetworkInterfaces(fakes.INTERFACEINFO)
-        self.assertRaises(exception.InstanceUnacceptable,
-            ifaces._set_nameserver,
+        self.assertRaises(
+            exception.InstanceUnacceptable, ifaces._set_nameserver,
             fakes.INTERFACEINFO[0]['id'], fakes.INTERFACEINFO[0]['dns'])
 
     def test_ovz_network_bridge_driver_plug(self):

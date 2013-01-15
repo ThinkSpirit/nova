@@ -40,9 +40,11 @@ class OpenVzVolumeTestCase(test.TestCase):
         try:
             CONF.injected_network_template
         except AttributeError as err:
-            CONF.register_opt(cfg.StrOpt('injected_network_template',
-                default='nova/virt/interfaces.template',
-                help='Stub for network template for testing purposes')
+            CONF.register_opt(
+                cfg.StrOpt(
+                    'injected_network_template',
+                    default='nova/virt/interfaces.template',
+                    help='Stub for network template for testing purposes')
             )
         CONF.use_ipv6 = False
         self.fake_file = mox.MockAnything()
@@ -55,8 +57,9 @@ class OpenVzVolumeTestCase(test.TestCase):
         self.mox.StubOutWithMock(fh, 'make_path')
         fh.make_path()
         self.mox.StubOutWithMock(openvz_conn.utils, 'execute')
-        openvz_conn.utils.execute('touch', fakes.TEMPFILE, run_as_root=True)\
-        .AndReturn(('', fakes.ERRORMSG))
+        openvz_conn.utils.execute(
+            'touch', fakes.TEMPFILE, run_as_root=True).AndReturn(
+                ('', fakes.ERRORMSG))
         self.mox.ReplayAll()
         fh.touch()
 
@@ -65,8 +68,9 @@ class OpenVzVolumeTestCase(test.TestCase):
         self.mox.StubOutWithMock(fh, 'make_path')
         fh.make_path()
         self.mox.StubOutWithMock(openvz_conn.utils, 'execute')
-        openvz_conn.utils.execute('touch', fakes.TEMPFILE, run_as_root=True)\
-        .AndRaise(exception.InstanceUnacceptable)
+        openvz_conn.utils.execute(
+            'touch', fakes.TEMPFILE, run_as_root=True).AndRaise(
+                exception.InstanceUnacceptable)
         self.mox.ReplayAll()
         self.assertRaises(exception.InstanceUnacceptable, fh.touch)
 
@@ -100,25 +104,28 @@ class OpenVzVolumeTestCase(test.TestCase):
 
     def test_set_perms_success(self):
         self.mox.StubOutWithMock(openvz_conn.utils, 'execute')
-        openvz_conn.utils.execute('chmod', 755, fakes.TEMPFILE, run_as_root=True)\
-        .AndReturn(('', fakes.ERRORMSG))
+        openvz_conn.utils.execute(
+            'chmod', 755, fakes.TEMPFILE, run_as_root=True).AndReturn(
+                ('', fakes.ERRORMSG))
         self.mox.ReplayAll()
         fh = OVZFile(fakes.TEMPFILE, 755)
         fh.set_permissions(755)
 
     def test_set_perms_failure(self):
         self.mox.StubOutWithMock(openvz_conn.utils, 'execute')
-        openvz_conn.utils.execute('chmod', 755, fakes.TEMPFILE, run_as_root=True)\
-        .AndRaise(exception.InstanceUnacceptable)
+        openvz_conn.utils.execute(
+            'chmod', 755, fakes.TEMPFILE, run_as_root=True).AndRaise(
+                exception.InstanceUnacceptable)
         self.mox.ReplayAll()
         fh = OVZFile(fakes.TEMPFILE, 755)
-        self.assertRaises(exception.InstanceUnacceptable,
-            fh.set_permissions, 755)
+        self.assertRaises(
+            exception.InstanceUnacceptable, fh.set_permissions, 755)
 
     def test_make_path_and_dir_success(self):
         self.mox.StubOutWithMock(openvz_conn.utils, 'execute')
-        openvz_conn.utils.execute('mkdir', '-p', mox.IgnoreArg(),
-            run_as_root=True).AndReturn(('', fakes.ERRORMSG))
+        openvz_conn.utils.execute(
+            'mkdir', '-p', mox.IgnoreArg(), run_as_root=True).AndReturn(
+                ('', fakes.ERRORMSG))
         self.mox.StubOutWithMock(openvz_conn.os.path, 'exists')
         openvz_conn.os.path.exists(mox.IgnoreArg()).AndReturn(False)
         self.mox.ReplayAll()
