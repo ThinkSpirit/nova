@@ -14,14 +14,16 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-
+import json
 import os
+import socket
 from nova.compute import power_state
 from nova.openstack.common import cfg
 from Cheetah.Template import Template
 from nova import exception
 import random
 from nova.virt import openvz
+from nova.virt.openvz import utils as ovz_utils
 
 CONF = cfg.CONF
 
@@ -161,7 +163,7 @@ class AdminContext(Context):
 class FakeOvzFile(object):
     def __init__(self, filename, perms):
         self.filename = filename
-        self.perms = perms
+        self.permissions = perms
         self.contents = []
 
     def __enter__(self):
@@ -182,7 +184,7 @@ class FakeOvzFile(object):
             self.set_permissions(self.permissions)
 
     def exists(self):
-        return
+        return True
 
     def make_path(self, path=None):
         return
@@ -235,6 +237,17 @@ class FakeOVZNetworkFile(FakeOvzFile):
         super(FakeOVZNetworkFile, self).__init__(filename, 644)
 
 
+class FakeOVZInstanceVolumeOps(object):
+    def __init__(self, instance):
+        self.instance = instance
+
+    def attach_all_volumes(self):
+        return
+
+    def detach_all_volumes(self):
+        return
+
+
 ROOTPASS = '2s3cUr3'
 
 USER = {'user': 'admin', 'role': 'admin', 'id': 1}
@@ -254,6 +267,15 @@ BDM = {
     ]
 }
 
+INSTANCETYPE = {
+    'id': 1,
+    'vcpus': 1,
+    'name': 'm1.small',
+    'memory_mb': 2048,
+    'swap': 0,
+    'root_gb': 20
+}
+
 INSTANCE = {
     "image_ref": 1,
     "name": "instance-00001002",
@@ -265,20 +287,12 @@ INSTANCE = {
     "admin_pass": ROOTPASS,
     "user_id": USER['id'],
     "project_id": PROJECT['id'],
-    "memory_mb": 1024,
+    "memory_mb": INSTANCETYPE['memory_mb'],
     "block_device_mapping": BDM
 }
 
 IMAGEPATH = '%s/%s.tar.gz' %\
             (CONF.ovz_image_template_dir, INSTANCE['image_ref'])
-
-INSTANCETYPE = {
-    'vcpus': 1,
-    'name': 'm1.small',
-    'memory_mb': 2048,
-    'swap': 0,
-    'root_gb': 20
-}
 
 INSTANCES = [INSTANCE, INSTANCE]
 
@@ -551,3 +565,21 @@ NETTEMPLATE = """
 
     #end for
     """
+
+HOSTSTATS = {
+    'vcpus': 12,
+    'vcpus_used': 2,
+    'cpu_info': json.dumps(PROCINFO),
+    'memory_mb': 36864,
+    'memory_mb_used': 2048,
+    'host_memory_total': 36864,
+    'host_memory_free': 34816,
+    'disk_total': 232,
+    'disk_used': 10,
+    'disk_available': 222,
+    'local_gb': 232,
+    'local_gb_used': 10,
+    'hypervisor_type': ovz_utils.get_hypervisor_type(),
+    'hypervisor_version': '3.2.0-31-generic',
+    'hypervisor_hostname': socket.gethostname()
+}
