@@ -400,11 +400,10 @@ def save_instance_metadata(instance_id, key, value):
         LOG.error(_('Instance not in the database: %s') % instance_id)
         LOG.error(_('Consistency check is needed, orphaned instance: %s') %
                   instance_id)
-    except exception.DBError as err:
+    except exception.DBError:
         LOG.error(
             _('Error saving metadata {%(key)s: %(value)s} '
               'for %(instance_id)s') % locals())
-        LOG.err(err)
 
 
 def read_instance_metadata(instance_id):
@@ -433,9 +432,8 @@ def read_instance_metadata(instance_id):
         LOG.error(_('Consistency check is needed, orphaned instance: %s') %
                   instance_id)
         return dict()
-    except exception.DBError as err:
+    except exception.DBError:
         LOG.error(_('Error reading metadata from db for %s') % instance_id)
-        LOG.error(err)
         return dict()
 
 

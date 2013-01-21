@@ -34,7 +34,6 @@ from nova.openstack.common import log as logging
 from nova import context
 from nova.compute import power_state
 from nova.compute import instance_types
-from nova.exception import ProcessExecutionError
 from nova.virt import images
 from nova.virt import driver
 from nova.virt.openvz import utils as ovz_utils
@@ -45,6 +44,7 @@ from nova.virt.openvz.file_ext.boot import OVZBootFile
 from nova.virt.openvz.file_ext.shutdown import OVZShutdownFile
 from nova.virt.openvz.network_drivers.tc import OVZTcRules
 from nova.virt.openvz.volume_ops import OVZInstanceVolumeOps
+from nova.virt.openvz.volume_drivers.iscsi import OVZISCSIStorageDriver
 
 openvz_conn_opts = [
     cfg.StrOpt('ovz_template_path',
@@ -1329,7 +1329,7 @@ class OpenVzDriver(driver.ComputeDriver):
             # lets try to coerce it into an int
             try:
                 instance_id = int(instance_id)
-            except ValueError:
+            except TypeError:
                 LOG.debug(_('Instance id is not an integer: %s') % instance_id)
                 validation_failed = True
 
@@ -1381,7 +1381,7 @@ class OpenVzDriver(driver.ComputeDriver):
 
                 LOG.debug(_('Attempting to destroy container'))
                 self._destroy(instance['id'])
-            except ProcessExecutionError as err:
+            except exception.InstanceUnacceptable as err:
                 LOG.error(_('There was an error with the destroy process'))
                 LOG.error(_(err))
                 timer.stop()
@@ -1447,8 +1447,6 @@ class OpenVzDriver(driver.ComputeDriver):
         meta = self._find_by_name(instance_name)
 
         if connection_info['driver_volume_type'] == 'iscsi':
-            from nova.virt.openvz.volume_drivers.iscsi \
-            import OVZISCSIStorageDriver
             volume = OVZISCSIStorageDriver(connection_info,
                                            meta['id'], mountpoint)
             volume.init_iscsi_device()
@@ -1472,8 +1470,6 @@ class OpenVzDriver(driver.ComputeDriver):
         meta = self._find_by_name(instance_name)
 
         if connection_info['driver_volume_type'] == 'iscsi':
-            from nova.virt.openvz.volume_drivers.iscsi \
-            import OVZISCSIStorageDriver
             volume = OVZISCSIStorageDriver(connection_info,
                                            meta['id'], mountpoint)
             volume.disconnect_iscsi_volume()
